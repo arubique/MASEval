@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "maseval"
 version = "0.0.1"
 description = "A benchmark for Multi-Agent Systems."
-authors = [{ name = "Cornelius Emde", email = "cornelius.emde@**.***" }]
+authors = [{ name = "Cornelius Emde", email = "cornelius@parameterlab.de" }]
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
