@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*" # Triggers on version tags like v0.1.2
+  workflow_dispatch: # Allows manual trigger from Actions tab
 
 jobs:
   release:

@@ -5,10 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   test-core:
-    name: Core Tests (No Optional Deps) 
+    name: Core Tests (No Optional Deps)
     runs-on: ubuntu-latest
     strategy:
       matrix:
