@@ -21,7 +21,12 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dependencies = ["gitpython>=3.1.0", "tqdm>=4.66.0", "rich>=14.1.0"]
+dependencies = [
+    "gitpython>=3.1.0",
+    "tqdm>=4.66.0",
+    "rich>=14.1.0",
+    "pydantic>=2.12.5",
+]
 
 # Enable optional dependencies for end users
 [project.optional-dependencies]
