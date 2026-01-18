@@ -12,11 +12,12 @@ When running benchmarks, tasks can fail for different reasons. MASEval provides 
 
 MASEval defines three error categories:
 
-| Exception          | Source         | Default Scoring | Example                         |
-| ------------------ | -------------- | --------------- | ------------------------------- |
-| `AgentError`       | Agent input    | Included        | Agent passed wrong type to tool |
-| `EnvironmentError` | Infrastructure | Excluded        | Database connection failed      |
-| `UserError`        | User simulator | Excluded        | LLM API unreachable             |
+| Exception           | Source         | Default Scoring | Example                         |
+| ------------------- | -------------- | --------------- | ------------------------------- |
+| `AgentError`        | Agent input    | Included        | Agent passed wrong type to tool |
+| `EnvironmentError`  | Infrastructure | Excluded        | Database connection failed      |
+| `UserError`         | User simulator | Excluded        | LLM API unreachable             |
+| `TaskTimeoutError`  | Timeout        | Excluded        | Task exceeded deadline          |
 
 ### AgentError
 
@@ -90,27 +91,22 @@ class SimulatedUser:
 
 One approach to exception handling places the boundary between agent responsibility and infrastructure responsibility at input validation:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     TOOL EXECUTION                          │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│   ┌─────────────────┐                                       │
-│   │  INPUT          │  Agent passes arguments               │
-│   │  VALIDATION     │                                       │
-│   │                 │  ❌ Fails → AgentError                │
-│   │                 │  ✓ Passes ↓                           │
-│   └─────────────────┘                                       │
-│           │                                                 │
-│           ▼                                                 │
-│   ┌─────────────────┐                                       │
-│   │  EXECUTION      │  Tool runs its logic                  │
-│   │                 │                                       │
-│   │                 │  ❌ Fails → EnvironmentError          │
-│   │                 │  ✓ Passes → Result                    │
-│   └─────────────────┘                                       │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph TOOL_EXECUTION[" "]
+        A[Agent passes arguments] --> B{INPUT VALIDATION}
+        B -->|Fails| C[AgentError]
+        B -->|Passes| D{EXECUTION}
+        D -->|Fails| E[EnvironmentError]
+        D -->|Passes| F[Result]
+    end
+
+    style TOOL_EXECUTION fill:none,stroke:#888
+    style B fill:#f5f5f5,stroke:#333
+    style D fill:#f5f5f5,stroke:#333
+    style C fill:#ffebee,stroke:#c62828
+    style E fill:#ffebee,stroke:#c62828
+    style F fill:#e8f5e9,stroke:#2e7d32
 ```
 
 With this pattern:
@@ -153,15 +149,16 @@ Suggestion: Provide limit as an integer, e.g., 10
 
 Each completed task has a status indicating what happened:
 
-| Status                    | Description                    |
-| ------------------------- | ------------------------------ |
-| `success`                 | Task completed normally        |
-| `agent_error`             | AgentError was raised          |
-| `environment_error`       | EnvironmentError was raised    |
-| `user_error`              | UserError was raised           |
-| `evaluation_failed`       | Evaluator raised an exception  |
-| `setup_failed`            | Task setup raised an exception |
-| `unknown_execution_error` | Unclassified exception         |
+| Status                    | Description                         |
+| ------------------------- | ----------------------------------- |
+| `success`                 | Task completed normally             |
+| `agent_error`             | AgentError was raised               |
+| `environment_error`       | EnvironmentError was raised         |
+| `user_error`              | UserError was raised                |
+| `task_timeout`            | Task exceeded configured timeout    |
+| `evaluation_failed`       | Evaluator raised an exception       |
+| `setup_failed`            | Task setup raised an exception      |
+| `unknown_execution_error` | Unclassified exception              |
 
 ## Scoring Considerations
 
