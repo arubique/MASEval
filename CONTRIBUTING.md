@@ -85,13 +85,17 @@ ruff check . --fix
 
 If you haven't activated your virtual environment, you can use `uv run ruff format .` and `uv run ruff check . --fix` instead.
 
-In addition to manual usage, `ruff` is integrated via **pre-commit hooks**. Once pre-commit is installed (e.g., by `pip install pre-commit`), formatting is automatically applied on every commit using `ruff format` with a line length of 80 characters. To enable this locally, run:
+For convenience, you can enable **pre-commit hooks** to automatically format and lint code on every commit:
 
 ```bash
-pre-commit install
+uv run pre-commit install
 ```
 
-After that, any files you commit will be automatically formatted, ensuring consistent style across the codebase without extra manual steps.
+This is optional—CI will catch any issues regardless. But if enabled, the hooks will:
+- **Format** code with `ruff format` (using project settings from `pyproject.toml`)
+- **Lint and auto-fix** issues with `ruff check --fix`
+
+> **Note**: The pre-commit hooks intentionally skip removing unused imports (`F401`) and unused variables (`F841`) to avoid disrupting work-in-progress code. Run `uv run ruff check . --fix` manually before opening a PR to clean these up.
 
 ### 3. Dependency Management
 
