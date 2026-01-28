@@ -24,6 +24,17 @@ Usage:
         --anchor_points_path /path/to/anchor_points_disagreement.pkl \\
         --use_full_prompt
 
+    # Run with DISCO prediction (predict full benchmark performance from anchor points)
+    python mmlu_benchmark.py \\
+        --model_id "alignment-handbook/zephyr-7b-sft-full" \\
+        --data_path /path/to/mmlu_prompts_examples.json \\
+        --anchor_points_path /path/to/anchor_points_disagreement.pkl \\
+        --use_full_prompt \\
+        --disco_prediction \\
+        --disco_model_path /path/to/fitted_weights.pkl \\
+        --disco_transform_path /path/to/transform.pkl \\
+        --pca 256
+
     # Run on a subset of tasks for testing
     python mmlu_benchmark.py \\
         --model_id "meta-llama/Llama-2-7b-hf" \\
@@ -123,6 +134,31 @@ def parse_args():
         type=int,
         default=1,
         help="Number of parallel workers for task execution",
+    )
+
+    # DISCO prediction arguments
+    parser.add_argument(
+        "--disco_prediction",
+        action="store_true",
+        help="Enable DISCO prediction of full benchmark performance from anchor points",
+    )
+    parser.add_argument(
+        "--disco_model_path",
+        type=str,
+        default=None,
+        help="Path to DISCO fitted weights pickle file (required if --disco_prediction)",
+    )
+    parser.add_argument(
+        "--disco_transform_path",
+        type=str,
+        default=None,
+        help="Path to DISCO PCA transform pickle file (required if --disco_prediction with --pca)",
+    )
+    parser.add_argument(
+        "--pca",
+        type=int,
+        default=256,
+        help="PCA dimension for DISCO embeddings (default: 256)",
     )
 
     return parser.parse_args()
@@ -256,16 +292,181 @@ def save_predictions_for_disco(
     predictions = np.array(predictions_list)
     predictions = predictions.reshape(1, -1, n_choices)  # (1, n_questions, n_choices)
 
-    with open(output_path, "wb") as f:
-        pickle.dump(predictions, f)
+    if output_path and output_path != "/dev/null":
+        with open(output_path, "wb") as f:
+            pickle.dump(predictions, f)
+        print(f"Saved predictions tensor to {output_path}")
+        print(f"  Shape: {predictions.shape}")
+    else:
+        print(f"Built predictions tensor with shape: {predictions.shape}")
 
-    print(f"Saved predictions tensor to {output_path}")
-    print(f"  Shape: {predictions.shape}")
+    return predictions
+
+
+def compute_disco_embedding(
+    predictions: np.ndarray,
+    pca: int,
+    transform=None,
+    apply_softmax: bool = True,
+) -> tuple:
+    """Compute DISCO embeddings from predictions.
+
+    This implements the embedding computation from disco-public/experiments.py.
+
+    Args:
+        predictions: Predictions tensor of shape (n_models, n_anchor_points, n_classes).
+        pca: PCA dimension for dimensionality reduction.
+        transform: Pre-fitted PCA transform. If None, a new one will be fitted.
+        apply_softmax: Whether to apply softmax to predictions.
+
+    Returns:
+        Tuple of (embeddings, transform) where embeddings has shape (n_models, pca).
+    """
+    try:
+        import torch
+        from sklearn.decomposition import PCA
+    except ImportError as e:
+        raise ImportError("DISCO prediction requires torch and sklearn. Install with: pip install torch scikit-learn") from e
+
+    # Convert to torch tensor
+    preds_tensor = torch.Tensor(predictions)
+
+    # Apply softmax if requested
+    if apply_softmax:
+        emb_unreduced = preds_tensor.softmax(dim=-1)
+    else:
+        emb_unreduced = preds_tensor
+
+    # Flatten to (n_models, n_anchor_points * n_classes)
+    emb_unreduced = emb_unreduced.reshape(emb_unreduced.shape[0], -1)
+
+    # Apply PCA
+    if pca is not None:
+        if transform is None:
+            # Fit new PCA transform
+            transform = PCA(
+                n_components=pca,
+                svd_solver="full",
+                random_state=42,
+            ).fit(emb_unreduced.numpy())
+
+        emb = transform.transform(emb_unreduced.numpy())
+        emb = torch.Tensor(emb)
+    else:
+        emb = emb_unreduced
+
+    return emb, transform
+
+
+def predict_with_disco(
+    predictions: np.ndarray,
+    model_path: str,
+    transform_path: Optional[str] = None,
+    pca: int = 256,
+) -> dict:
+    """Predict full benchmark performance using DISCO.
+
+    This implements the prediction logic from disco-public/scripts/predict_model_performance.py.
+
+    Args:
+        predictions: Predictions tensor of shape (n_models, n_anchor_points, n_classes).
+        model_path: Path to fitted weights pickle file.
+        transform_path: Path to PCA transform pickle file (optional, can be in model_path).
+        pca: PCA dimension (default: 256).
+
+    Returns:
+        Dict with predicted accuracies and metadata.
+    """
+    # Load model data
+    with open(model_path, "rb") as f:
+        model_data = pickle.load(f)
+
+    if not isinstance(model_data, dict):
+        raise ValueError(f"model_path must contain a dict. Got {type(model_data)}")
+
+    # Get transform
+    if transform_path is not None:
+        with open(transform_path, "rb") as f:
+            transform = pickle.load(f)
+    elif "transform" in model_data:
+        transform = model_data["transform"]
+    else:
+        raise ValueError("Transform not found. Provide --disco_transform_path or ensure the model file contains a 'transform' key.")
+
+    # Get fitted weights
+    if "fitted_weights" in model_data:
+        fitted_weights = model_data["fitted_weights"]
+    else:
+        # Assume the dict itself is fitted_weights (excluding transform)
+        fitted_weights = {k: v for k, v in model_data.items() if k != "transform"}
+        if not fitted_weights:
+            raise ValueError("Could not find fitted_weights in model file.")
+
+    # Get metadata or infer from structure
+    if "sampling_name" in model_data:
+        sampling_name = model_data["sampling_name"]
+    else:
+        sampling_name = list(fitted_weights.keys())[0]
+
+    if "number_item" in model_data:
+        number_item = model_data["number_item"]
+    else:
+        number_item = list(fitted_weights[sampling_name].keys())[0]
+
+    if "fitted_model_type" in model_data:
+        fitted_model_type = model_data["fitted_model_type"]
+    else:
+        fitted_model_type = list(fitted_weights[sampling_name][number_item].keys())[0]
+
+    print(f"  Using: sampling={sampling_name}, n_items={number_item}, model={fitted_model_type}")
+
+    # Compute embeddings
+    embeddings, _ = compute_disco_embedding(
+        predictions,
+        pca=pca,
+        transform=transform,
+        apply_softmax=True,
+    )
+
+    # Get the fitted model
+    fitted_model = fitted_weights[sampling_name][number_item][fitted_model_type]
+
+    # Predict accuracies for each model
+    predicted_accs = {}
+    for model_idx in range(embeddings.shape[0]):
+        model_embedding = embeddings[model_idx]
+
+        # Convert to numpy if needed
+        if hasattr(model_embedding, "numpy"):
+            model_embedding_np = model_embedding.numpy()
+        else:
+            model_embedding_np = np.array(model_embedding)
+
+        # Predict using fitted model
+        predicted_acc = fitted_model.predict(model_embedding_np.reshape(1, -1))[0]
+        predicted_accs[model_idx] = predicted_acc
+
+    return {
+        "predicted_accuracies": predicted_accs,
+        "sampling_name": sampling_name,
+        "number_item": number_item,
+        "fitted_model_type": fitted_model_type,
+        "pca": pca,
+    }
 
 
 def main():
     """Main entry point."""
     args = parse_args()
+
+    # Validate DISCO prediction arguments
+    if args.disco_prediction:
+        if args.disco_model_path is None:
+            raise ValueError("--disco_model_path is required when --disco_prediction is enabled")
+        if args.anchor_points_path is None:
+            raise ValueError("--anchor_points_path is required when --disco_prediction is enabled")
+        if args.pca is not None and args.disco_transform_path is None:
+            print("Warning: --pca specified without --disco_transform_path. Transform will be loaded from model file if available.")
 
     print("=" * 80)
     print("MMLU Benchmark - MASEval")
@@ -276,6 +477,11 @@ def main():
     print(f"Use full prompt: {args.use_full_prompt}")
     print(f"Device: {args.device}")
     print(f"Output dir: {args.output_dir}")
+    if args.disco_prediction:
+        print("DISCO prediction: ENABLED")
+        print(f"  Model path: {args.disco_model_path}")
+        print(f"  Transform path: {args.disco_transform_path or '(from model file)'}")
+        print(f"  PCA dimension: {args.pca}")
     print("=" * 80)
 
     # Load tasks
@@ -322,39 +528,79 @@ def main():
     }
     results = benchmark.run(tasks=tasks, agent_data=agent_data)
 
-    # Compute metrics
+    # Compute metrics on evaluated tasks
     metrics = compute_benchmark_metrics(results)
 
     print("\n" + "=" * 80)
-    print("Results Summary")
+    print("Results Summary (Evaluated Tasks)")
     print("=" * 80)
     print(f"Total tasks: {metrics['total_tasks']}")
     print(f"Correct: {metrics['correct_count']}")
-    print(f"Accuracy: {metrics['acc']:.4f}")
-    print(f"Accuracy (norm): {metrics['acc_norm']:.4f}")
+    print(f"Accuracy (on anchor points): {metrics['acc']:.4f}")
+    print(f"Accuracy norm (on anchor points): {metrics['acc_norm']:.4f}")
 
-    # Save predictions for DISCO if requested
-    if args.predictions_path:
-        save_predictions_for_disco(
+    # Build predictions tensor for DISCO
+    predictions = None
+    if args.predictions_path or args.disco_prediction:
+        predictions = save_predictions_for_disco(
             results=results,
-            output_path=args.predictions_path,
+            output_path=args.predictions_path if args.predictions_path else "/dev/null",
             anchor_points=anchor_points,
         )
 
+    # Run DISCO prediction if enabled
+    disco_results = None
+    if args.disco_prediction:
+        print("\n" + "=" * 80)
+        print("DISCO Prediction")
+        print("=" * 80)
+        print("Computing embeddings and predicting full benchmark accuracy...")
+
+        disco_results = predict_with_disco(
+            predictions=predictions,
+            model_path=args.disco_model_path,
+            transform_path=args.disco_transform_path,
+            pca=args.pca,
+        )
+
+        print("\n" + "-" * 40)
+        print("DISCO Predicted Full Benchmark Accuracy:")
+        print("-" * 40)
+        for model_idx, acc in disco_results["predicted_accuracies"].items():
+            print(f"  Model {model_idx}: {acc:.6f}")
+
+        # Compare with actual anchor accuracy
+        print("\n" + "-" * 40)
+        print("Comparison:")
+        print("-" * 40)
+        predicted_acc = disco_results["predicted_accuracies"][0]
+        actual_anchor_acc = metrics["acc"]
+        print(f"  Actual accuracy (on anchor points): {actual_anchor_acc:.6f}")
+        print(f"  DISCO predicted accuracy (full benchmark): {predicted_acc:.6f}")
+        print(f"  Difference: {predicted_acc - actual_anchor_acc:+.6f}")
+
     # Save summary
+    summary_data = {
+        "model_id": args.model_id,
+        "data_path": str(args.data_path),
+        "anchor_points_path": str(args.anchor_points_path) if args.anchor_points_path else None,
+        "use_full_prompt": args.use_full_prompt,
+        "metrics": metrics,
+    }
+
+    if disco_results:
+        summary_data["disco_prediction"] = {
+            "predicted_accuracy": disco_results["predicted_accuracies"][0],
+            "sampling_name": disco_results["sampling_name"],
+            "number_item": disco_results["number_item"],
+            "fitted_model_type": disco_results["fitted_model_type"],
+            "pca": disco_results["pca"],
+        }
+
     summary_path = output_dir / "summary.json"
     with open(summary_path, "w") as f:
-        json.dump(
-            {
-                "model_id": args.model_id,
-                "data_path": str(args.data_path),
-                "anchor_points_path": str(args.anchor_points_path) if args.anchor_points_path else None,
-                "use_full_prompt": args.use_full_prompt,
-                "metrics": metrics,
-            },
-            f,
-            indent=2,
-        )
+        json.dump(summary_data, f, indent=2)
+
     print(f"\nSummary saved to: {summary_path}")
     print(f"Full results saved to: {logger.output_dir}")
 
