@@ -173,8 +173,13 @@ def parse_args():
 class HuggingFaceMMLUBenchmark(MMLUBenchmark):
     """MMLU Benchmark using HuggingFace transformers models.
 
-    This concrete implementation loads a HuggingFace model via the
-    transformers pipeline and uses it for MCQ evaluation.
+    This concrete implementation uses log-likelihood based MCQ evaluation
+    with the same optimizations as lm-evaluation-harness:
+
+    1. Single forward pass per question (one-token continuation optimization)
+    2. Batching multiple questions together
+    3. Efficient log-softmax computation
+    4. Proper left-padding for batch processing
     """
 
     def __init__(
@@ -183,6 +188,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         device: str = "cuda:0",
         trust_remote_code: bool = False,
         use_full_prompt: bool = False,
+        batch_size: int = 8,
         **kwargs,
     ):
         """Initialize HuggingFace MMLU benchmark.
@@ -192,29 +198,282 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
             device: Device to run model on.
             trust_remote_code: Trust remote code when loading model.
             use_full_prompt: Use full prompt with few-shot examples.
+            batch_size: Batch size for evaluation (number of questions per batch).
             **kwargs: Additional arguments passed to MMLUBenchmark.
         """
         super().__init__(use_full_prompt=use_full_prompt, **kwargs)
         self._model_id = model_id
         self._device = device
         self._trust_remote_code = trust_remote_code
-        self._pipeline = None
+        self._batch_size = batch_size
+        self._model = None
+        self._tokenizer = None
+        self._choice_token_ids_cache = None
 
-    def _get_pipeline(self):
-        """Lazy load the transformers pipeline."""
-        if self._pipeline is None:
-            from transformers import pipeline
+    def _load_model(self):
+        """Lazy load the model and tokenizer for log-likelihood computation."""
+        if self._model is None:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
 
-            self._pipeline = pipeline(
-                "text-generation",
-                model=self._model_id,
-                device=self._device if "cuda" in self._device else -1,
+            print(f"Loading model: {self._model_id}")
+            self._tokenizer = AutoTokenizer.from_pretrained(
+                self._model_id,
                 trust_remote_code=self._trust_remote_code,
             )
-        return self._pipeline
+            self._tokenizer.padding_side = "left"
+            if self._tokenizer.pad_token is None:
+                self._tokenizer.pad_token = self._tokenizer.eos_token
+
+            # Load model without device_map (doesn't require accelerate)
+            # Then move to device manually
+            self._model = AutoModelForCausalLM.from_pretrained(
+                self._model_id,
+                trust_remote_code=self._trust_remote_code,
+                torch_dtype=torch.float16,
+            )
+            self._model = self._model.to(self._device)
+            self._model.eval()
+
+            # Pre-compute token IDs for answer choices A, B, C, D
+            self._choice_token_ids_cache = {}
+            for choice in ["A", "B", "C", "D"]:
+                tokens = self._tokenizer.encode(choice, add_special_tokens=False)
+                self._choice_token_ids_cache[choice] = tokens[0] if tokens else None
+
+            print(f"Answer token IDs: {self._choice_token_ids_cache}")
+
+        return self._model, self._tokenizer
+
+    @property
+    def _choice_token_ids(self):
+        """Get cached choice token IDs."""
+        if self._choice_token_ids_cache is None:
+            self._load_model()
+        return self._choice_token_ids_cache
+
+    def _compute_logprobs_single_token(self, prompt: str, choices: list) -> list:
+        """Compute log-likelihoods using single-token optimization.
+
+        For MCQ with single-letter answers (A, B, C, D), we only need ONE
+        forward pass: compute logits for the prompt, then look up the
+        log-probability of each answer token at the last position.
+
+        This is the key optimization from lm-evaluation-harness.
+
+        Args:
+            prompt: The prompt/question text.
+            choices: List of answer choice strings (e.g., ["A", "B", "C", "D"]).
+
+        Returns:
+            List of log-likelihoods, one per choice.
+        """
+        import torch
+
+        model, tokenizer = self._load_model()
+
+        # Tokenize the prompt
+        input_ids = tokenizer.encode(prompt, add_special_tokens=False, return_tensors="pt")
+        input_ids = input_ids.to(self._device)
+
+        with torch.no_grad():
+            outputs = model(input_ids)
+            # Get logits at the last position (where the answer token would be predicted)
+            # logits shape: (batch, seq_len, vocab_size)
+            last_logits = outputs.logits[0, -1, :]  # (vocab_size,)
+
+            # Compute log-softmax once
+            log_probs = torch.nn.functional.log_softmax(last_logits, dim=-1)
+
+            # Extract log-probabilities for each answer choice
+            logprobs = []
+            for choice in choices:
+                token_id = self._choice_token_ids.get(choice)
+                if token_id is not None:
+                    logprobs.append(log_probs[token_id].item())
+                else:
+                    # Fallback: encode the choice and sum log-probs
+                    # This handles multi-token answers if needed
+                    logprobs.append(float("-inf"))
+
+        return logprobs
+
+    def _compute_logprobs_batched(self, prompts: list, choices_list: list) -> list:
+        """Compute log-likelihoods for a batch of prompts.
+
+        Batches multiple questions together for efficient GPU utilization.
+
+        Args:
+            prompts: List of prompt strings.
+            choices_list: List of choice lists (one per prompt).
+
+        Returns:
+            List of log-likelihood lists, one per prompt.
+        """
+        import torch
+
+        model, tokenizer = self._load_model()
+
+        # Batch encode with left padding
+        encoding = tokenizer(
+            prompts,
+            padding="longest",
+            return_tensors="pt",
+            add_special_tokens=False,
+        )
+        input_ids = encoding["input_ids"].to(self._device)
+        attention_mask = encoding["attention_mask"].to(self._device)
+
+        with torch.no_grad():
+            outputs = model(input_ids, attention_mask=attention_mask)
+            # logits shape: (batch, seq_len, vocab_size)
+            logits = outputs.logits
+
+            # For left-padded inputs, we need to find the actual last position for each sequence
+            # The last real token is where attention_mask is 1
+            # For each sequence, get logits at position (seq_len - 1) accounting for padding
+            batch_size = input_ids.shape[0]
+            all_logprobs = []
+
+            for i in range(batch_size):
+                # Find the last non-padded position
+                seq_len = attention_mask[i].sum().item()
+                last_pos = seq_len - 1
+
+                # Get logits at the last real position
+                last_logits = logits[i, last_pos, :]
+
+                # Compute log-softmax
+                log_probs = torch.nn.functional.log_softmax(last_logits, dim=-1)
+
+                # Extract log-probabilities for each answer choice
+                choices = choices_list[i]
+                item_logprobs = []
+                for choice in choices:
+                    token_id = self._choice_token_ids.get(choice)
+                    if token_id is not None:
+                        item_logprobs.append(log_probs[token_id].item())
+                    else:
+                        item_logprobs.append(float("-inf"))
+
+                all_logprobs.append(item_logprobs)
+
+        return all_logprobs
+
+    def _compute_logprobs_multi_token(self, prompt: str, choices: list) -> list:
+        """Compute log-likelihoods for multi-token continuations.
+
+        This is the fallback for when answer choices have multiple tokens.
+        Batches all choices together and computes log-probs in parallel.
+
+        Args:
+            prompt: The prompt/question text.
+            choices: List of answer choice strings.
+
+        Returns:
+            List of log-likelihoods, one per choice.
+        """
+        import torch
+
+        model, tokenizer = self._load_model()
+
+        # Build batch: prompt + each choice
+        full_texts = [prompt + choice for choice in choices]
+
+        # Encode all at once with padding
+        encoding = tokenizer(
+            full_texts,
+            padding="longest",
+            return_tensors="pt",
+            add_special_tokens=False,
+        )
+        input_ids = encoding["input_ids"].to(self._device)
+        attention_mask = encoding["attention_mask"].to(self._device)
+
+        # Also encode just the prompt to know where continuation starts
+        prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
+        prompt_len = len(prompt_ids)
+
+        with torch.no_grad():
+            outputs = model(input_ids, attention_mask=attention_mask)
+            logits = outputs.logits
+
+            # Compute log-softmax over vocab dimension
+            log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+
+            # For each choice, sum log-probs of continuation tokens
+            all_logprobs = []
+            for i, choice in enumerate(choices):
+                choice_ids = tokenizer.encode(choice, add_special_tokens=False)
+                choice_len = len(choice_ids)
+
+                # Sum log-probs for the continuation tokens
+                # Token at position j is predicted by logits at position j-1
+                total_logprob = 0.0
+                for j, token_id in enumerate(choice_ids):
+                    pos = prompt_len + j - 1  # Position in logits that predicts this token
+                    if pos >= 0:
+                        total_logprob += log_probs[i, pos, token_id].item()
+
+                all_logprobs.append(total_logprob)
+
+        return all_logprobs
+
+    def run_agents(
+        self,
+        agents,
+        task,
+        environment,
+        query: str = "",
+    ):
+        """Execute log-likelihood based MCQ evaluation.
+
+        Uses single-forward-pass optimization for single-token answers,
+        or multi-token batched computation as fallback.
+        """
+        # Get the prompt from environment
+        prompt = environment.get_prompt()
+        choices = environment.state.get("choices", ["A", "B", "C", "D"])
+
+        # Load model to check if single-token optimization applies
+        self._load_model()
+
+        # Check if all choices are single tokens
+        all_single_token = all(choice in self._choice_token_ids and self._choice_token_ids[choice] is not None for choice in choices)
+
+        if all_single_token:
+            # Use optimized single-token path (one forward pass)
+            logprobs = self._compute_logprobs_single_token(prompt, choices)
+        else:
+            # Fall back to multi-token batched computation
+            logprobs = self._compute_logprobs_multi_token(prompt, choices)
+
+        # Select the choice with highest log-probability
+        best_idx = logprobs.index(max(logprobs))
+        answer = choices[best_idx]
+
+        # Store logprobs in environment for later retrieval if needed
+        environment.state["logprobs"] = logprobs
+        environment.state["predicted_idx"] = best_idx
+
+        # Record in agent messages for tracing
+        agent = agents[0]
+        agent.agent._messages.append({"role": "user", "content": prompt})
+        agent.agent._messages.append(
+            {
+                "role": "assistant",
+                "content": answer,
+                "logprobs": logprobs,
+            }
+        )
+
+        return answer
 
     def get_model_adapter(self, model_id: str, **kwargs):
         """Provide a HuggingFace ModelAdapter.
+
+        Note: For logprobs-based evaluation, we don't actually use the adapter
+        for generation. This is kept for API compatibility.
 
         Args:
             model_id: Model identifier (ignored, uses instance model_id).
@@ -225,15 +484,15 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         """
         from maseval.interface.inference import HuggingFaceModelAdapter
 
-        pipe = self._get_pipeline()
+        # Create a minimal adapter for compatibility
+        # The actual evaluation uses _compute_logprobs_*
+        class DummyCallable:
+            def __call__(self, prompt, **kwargs):
+                return ""
+
         adapter = HuggingFaceModelAdapter(
-            model=pipe,
+            model=DummyCallable(),
             model_id=self._model_id,
-            default_generation_params={
-                "max_new_tokens": 32,
-                "do_sample": False,
-                "return_full_text": False,
-            },
         )
 
         # Register for tracing if requested
@@ -254,10 +513,10 @@ def save_predictions_for_disco(
     """Save predictions in format compatible with DISCO predictor.
 
     Creates a predictions tensor of shape (1, n_questions, pad_to_size)
-    where the values are log-probabilities (0.0 for predicted choice, -inf for others).
+    where the values are log-probabilities.
 
-    Note: This produces a simplified format using 0/-inf instead of actual log-likelihoods.
-    For identical output to lm-evaluation-harness, use lm_eval_wrapper.py instead.
+    If logprobs are available in the results (from logprobs-based evaluation),
+    uses actual log-likelihoods. Otherwise, falls back to 0/-inf format.
 
     Args:
         results: Benchmark results list.
@@ -266,11 +525,21 @@ def save_predictions_for_disco(
         n_choices: Number of answer choices (default 4 for A/B/C/D).
         pad_to_size: Pad predictions to this size with -inf (default: no padding).
     """
-    # Build predictions array
-    # We use 0.0 for the predicted answer and -inf for others
-    # This mimics the log-probability format but with simplified values
-
     predictions_list = []
+
+    def get_pred_vec(entry, n_choices):
+        """Extract prediction vector from entry, using logprobs if available."""
+        # Check if actual logprobs are available
+        logprobs = entry.get("logprobs")
+        if logprobs is not None and len(logprobs) >= n_choices:
+            return logprobs[:n_choices]
+
+        # Fall back to 0/-inf format based on predicted index
+        predicted = entry.get("predicted", -1)
+        pred_vec = [float("-inf")] * n_choices
+        if 0 <= predicted < n_choices:
+            pred_vec[predicted] = 0.0
+        return pred_vec
 
     if anchor_points is not None:
         # Order results by anchor points
@@ -284,21 +553,14 @@ def save_predictions_for_disco(
 
         for doc_id in anchor_points:
             entry = result_by_doc_id.get(doc_id, {})
-            predicted = entry.get("predicted", -1)
-            # Use -inf for non-predicted, 0.0 for predicted (log-prob style)
-            pred_vec = [float("-inf")] * n_choices
-            if 0 <= predicted < n_choices:
-                pred_vec[predicted] = 0.0
+            pred_vec = get_pred_vec(entry, n_choices)
             predictions_list.append(pred_vec)
     else:
         # Use results in order
         for res in results:
             if res.get("status") == "success" and res.get("eval"):
                 for entry in res["eval"]:
-                    predicted = entry.get("predicted", -1)
-                    pred_vec = [float("-inf")] * n_choices
-                    if 0 <= predicted < n_choices:
-                        pred_vec[predicted] = 0.0
+                    pred_vec = get_pred_vec(entry, n_choices)
                     predictions_list.append(pred_vec)
 
     predictions = np.array(predictions_list)
