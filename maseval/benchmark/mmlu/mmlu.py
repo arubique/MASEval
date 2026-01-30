@@ -33,7 +33,7 @@ import json
 import pickle
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
 # numpy is optional - only needed for anchor points processing
 try:
@@ -80,15 +80,43 @@ class AnchorPointsTaskQueue(AdaptiveTaskQueue):
             anchor_points: Optional list of task indices (doc_ids) to evaluate.
                 If None, evaluates all tasks in order.
         """
+        # If anchor_points provided, filter tasks to only include anchor tasks
+        # This dramatically improves performance by avoiding O(n²) iteration
+        if anchor_points is not None:
+            # Build index mapping for quick lookup
+            task_by_doc_id: Dict[int, Task] = {}
+            for i, task in enumerate(tasks):
+                doc_id = task.metadata.get("doc_id", i)
+                task_by_doc_id[doc_id] = task
+
+            # Filter to only anchor tasks, preserving anchor order
+            anchor_tasks = []
+            for doc_id in anchor_points:
+                task = task_by_doc_id.get(doc_id)
+                if task is not None:
+                    anchor_tasks.append(task)
+
+            # Store original for reference
+            self._all_tasks = tasks
+            self._task_by_doc_id = task_by_doc_id
+            tasks = anchor_tasks
+
         super().__init__(tasks)
         self._anchor_points = anchor_points
         self._anchor_idx = 0
 
-        # Build index mapping for quick lookup
-        self._task_by_doc_id: Dict[int, Task] = {}
-        for i, task in enumerate(tasks):
-            doc_id = task.metadata.get("doc_id", i)
-            self._task_by_doc_id[doc_id] = task
+        # Initialize state immediately (since __iter__ is overridden and skips initial_state())
+        self._state = self.initial_state()
+
+    def __iter__(self) -> Iterator[Task]:
+        """Yield tasks in anchor point order.
+
+        Since tasks are pre-filtered during __init__, we simply iterate
+        over the stored tasks in order. This avoids the infinite loop
+        issue in AdaptiveTaskQueue.__iter__ which relies on on_task_repeat_end
+        to remove tasks from _remaining.
+        """
+        return iter(self._tasks)
 
     def initial_state(self) -> Dict[str, Any]:
         """Initialize state for anchor point iteration."""
@@ -107,34 +135,8 @@ class AnchorPointsTaskQueue(AdaptiveTaskQueue):
         Returns:
             Next anchor task, or None if all anchors processed.
         """
-        if self._anchor_points is None:
-            # No anchor filtering - return next remaining task
-            return remaining[0] if remaining else None
-
-        anchor_idx = state["anchor_idx"]
-
-        # Check if we've processed all anchor points
-        if anchor_idx >= len(self._anchor_points):
-            return None
-
-        # Get the doc_id for the next anchor point
-        doc_id = self._anchor_points[anchor_idx]
-
-        # Find the task with this doc_id
-        task = self._task_by_doc_id.get(doc_id)
-
-        if task is None:
-            # Skip missing anchor points
-            state["anchor_idx"] = anchor_idx + 1
-            return self.select_next_task(remaining, state)
-
-        # Check if task is still in remaining
-        if task not in remaining:
-            # Task already processed, move to next anchor
-            state["anchor_idx"] = anchor_idx + 1
-            return self.select_next_task(remaining, state)
-
-        return task
+        # Simply return the first remaining task since we pre-filtered to anchor tasks only
+        return remaining[0] if remaining else None
 
     def update_state(self, task: Task, report: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
         """Update state after task completion.
@@ -150,11 +152,6 @@ class AnchorPointsTaskQueue(AdaptiveTaskQueue):
         doc_id = task.metadata.get("doc_id")
         state["completed_anchors"].append(doc_id)
         state["anchor_idx"] += 1
-
-        # Check if we've completed all anchors
-        if self._anchor_points is not None:
-            if state["anchor_idx"] >= len(self._anchor_points):
-                self.stop()
 
         return state
 
