@@ -46,9 +46,15 @@ litellm = ["litellm>=1.0.0"]
 wandb = ["wandb>=0.15.0"]
 langfuse = ["langfuse>=3.3.4"]
 
+# DISCO prediction (for MMLU benchmark example)
+disco = [
+    "scikit-learn>=1.7.2",
+    "torch>=2.10.0",
+]
+
 # Dependencies for running examples (only what's actually used)
 examples = [
-    "maseval[smolagents,langgraph,llamaindex,anthropic,openai,google-genai,litellm,langfuse]",
+    "maseval[smolagents,langgraph,llamaindex,anthropic,openai,google-genai,litellm,langfuse,disco]",
     # Additional integrations used in examples
     "langchain>=0.3.27",
     "langchain-google-genai>=2.1.12",
@@ -103,6 +109,7 @@ markers = [
     "smolagents: Tests that specifically require smolagents",
     "langgraph: Tests that specifically require langgraph",
     "llamaindex: Tests that specifically require llama-index-core",
+    "slow: Slow tests that require significant resources (GPU, long runtime)",
 ]
 
 [tool.coverage.run]
