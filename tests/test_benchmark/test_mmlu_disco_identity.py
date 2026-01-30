@@ -236,3 +236,120 @@ def test_format_compatibility_with_maseval_output():
     assert predictions.shape[0] == 1  # n_models
     assert predictions.shape[1] == 2  # n_questions
     assert predictions.shape[2] == 4  # n_choices
+
+
+# Path to MASEval-produced predictions (set by running mmlu_benchmark.py with --predictions_path)
+MASEVAL_PREDICTIONS_PATH = Path("/weka/oh/arubinstein17/github/disco-public/output/mmlu_maseval/maseval_predictions.pkl")
+
+
+class TestMASEvalPredictionsComparison:
+    """Tests that compare MASEval predictions with disco-public reference.
+
+    These tests verify that predictions saved via mmlu_benchmark.py with
+    --predictions_path are format-compatible with disco-public output.
+
+    To run these tests, first generate predictions by running:
+        python examples/mmlu_benchmark/mmlu_benchmark.py \\
+            --model_id alignment-handbook/zephyr-7b-sft-full \\
+            --data_path /path/to/mmlu_prompts_examples.json \\
+            --anchor_points_path /path/to/anchor_points.pkl \\
+            --predictions_path /path/to/maseval_predictions.pkl \\
+            --pad_to_size 31
+    """
+
+    @pytest.fixture
+    def maseval_predictions(self):
+        """Load MASEval-produced predictions."""
+        if not MASEVAL_PREDICTIONS_PATH.exists():
+            pytest.skip(f"MASEval predictions not found: {MASEVAL_PREDICTIONS_PATH}. Run mmlu_benchmark.py with --predictions_path first.")
+        with open(MASEVAL_PREDICTIONS_PATH, "rb") as f:
+            return pickle.load(f)
+
+    def test_maseval_predictions_shape_matches_reference(self, maseval_predictions, reference_predictions):
+        """MASEval predictions should have same shape as reference."""
+        assert maseval_predictions.shape == reference_predictions.shape, (
+            f"Shape mismatch: MASEval {maseval_predictions.shape} vs reference {reference_predictions.shape}"
+        )
+
+    def test_maseval_predictions_has_correct_format(self, maseval_predictions):
+        """MASEval predictions should have correct format (padded with -inf)."""
+        # Check shape
+        assert maseval_predictions.ndim == 3
+        assert maseval_predictions.shape[0] == 1  # n_models
+        assert maseval_predictions.shape[1] == 100  # n_anchor_points
+        assert maseval_predictions.shape[2] == 31  # padded size
+
+        # Check padding (columns 4-31 should be -inf)
+        padding = maseval_predictions[0, :, 4:]
+        assert np.all(np.isinf(padding) & (padding < 0)), "Padding should be -inf"
+
+    def test_maseval_predictions_argmax_matches_reference(self, maseval_predictions, reference_predictions):
+        """Argmax of predictions (predicted answers) should match.
+
+        This test checks that both methods predict the same answer for each question,
+        even though the actual log-probability values differ.
+        """
+        # Get argmax for first 4 columns (A, B, C, D choices)
+        maseval_choices = maseval_predictions[0, :, :4]
+        reference_choices = reference_predictions[0, :, :4]
+
+        maseval_argmax = np.argmax(maseval_choices, axis=1)
+        reference_argmax = np.argmax(reference_choices, axis=1)
+
+        # Count matches
+        matches = (maseval_argmax == reference_argmax).sum()
+        total = len(maseval_argmax)
+        match_rate = matches / total
+
+        print(f"Answer match rate: {matches}/{total} ({match_rate:.2%})")
+
+        # They should match exactly if using the same model
+        # Allow for some tolerance due to different evaluation methods
+        assert match_rate >= 0.9, f"Answer match rate {match_rate:.2%} is too low. Expected >= 90% if using same model."
+
+    def test_disco_prediction_produces_similar_accuracy(self, maseval_predictions, reference_predictions):
+        """DISCO prediction from both prediction sets should give similar results."""
+        try:
+            import torch
+        except ImportError:
+            pytest.skip("torch not available")
+
+        if not all([FITTED_WEIGHTS_PATH.exists(), TRANSFORM_PATH.exists()]):
+            pytest.skip("DISCO model files not available")
+
+        # Load model and transform
+        with open(FITTED_WEIGHTS_PATH, "rb") as f:
+            model_data = pickle.load(f)
+        with open(TRANSFORM_PATH, "rb") as f:
+            transform = pickle.load(f)
+
+        # Get fitted model
+        if "fitted_weights" in model_data:
+            fitted_weights = model_data["fitted_weights"]
+        else:
+            fitted_weights = {k: v for k, v in model_data.items() if k != "transform"}
+
+        sampling_name = list(fitted_weights.keys())[0]
+        number_item = list(fitted_weights[sampling_name].keys())[0]
+        fitted_model_type = list(fitted_weights[sampling_name][number_item].keys())[0]
+        fitted_model = fitted_weights[sampling_name][number_item][fitted_model_type]
+
+        def compute_disco_accuracy(predictions):
+            """Compute DISCO-predicted accuracy from predictions tensor."""
+            preds_tensor = torch.Tensor(predictions)
+            emb_unreduced = preds_tensor.softmax(dim=-1)
+            emb_unreduced = emb_unreduced.reshape(emb_unreduced.shape[0], -1)
+            emb = transform.transform(emb_unreduced.numpy())
+            return fitted_model.predict(emb)[0]
+
+        maseval_acc = compute_disco_accuracy(maseval_predictions)
+        reference_acc = compute_disco_accuracy(reference_predictions)
+
+        print(f"DISCO predicted accuracy from MASEval predictions: {maseval_acc:.4f}")
+        print(f"DISCO predicted accuracy from reference predictions: {reference_acc:.4f}")
+        print(f"Difference: {abs(maseval_acc - reference_acc):.4f}")
+
+        # The accuracies should be reasonably close
+        assert abs(maseval_acc - reference_acc) < 0.1, (
+            f"DISCO predictions differ too much: MASEval={maseval_acc:.4f}, reference={reference_acc:.4f}"
+        )
