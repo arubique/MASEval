@@ -243,7 +243,7 @@ class MMLUEvaluator(Evaluator):
             final_answer: The model's final answer.
 
         Returns:
-            Dict with acc, acc_norm, predicted, gold, and correct fields.
+            Dict with acc, acc_norm, predicted, gold, correct, and optionally logprobs fields.
         """
         # Parse the model's answer
         predicted = self._parse_answer(final_answer or "")
@@ -251,7 +251,7 @@ class MMLUEvaluator(Evaluator):
         # Check if correct
         correct = predicted == self.gold
 
-        return {
+        result = {
             "acc": 1.0 if correct else 0.0,
             "acc_norm": 1.0 if correct else 0.0,
             "predicted": predicted,
@@ -259,6 +259,15 @@ class MMLUEvaluator(Evaluator):
             "correct": correct,
             "doc_id": self.task.metadata.get("doc_id"),
         }
+
+        # Extract logprobs from traces if available (for logprobs-based evaluation)
+        messages = traces.get("messages", [])
+        for msg in messages:
+            if isinstance(msg, dict) and "logprobs" in msg:
+                result["logprobs"] = msg["logprobs"]
+                break
+
+        return result
 
     def _parse_answer(self, response: str) -> int:
         """Parse model response to extract answer choice.
