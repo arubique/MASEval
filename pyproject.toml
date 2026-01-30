@@ -85,6 +85,15 @@ tau2 = ["docstring-parser>=0.16"]
 # Dependencies for running examples (only what's actually used)
 examples = [
     "maseval[smolagents,langgraph,llamaindex,camel,anthropic,openai,google-genai,litellm,langfuse,gaia2,macs,tau2]",
+# DISCO prediction (for MMLU benchmark example)
+disco = [
+    "scikit-learn>=1.7.2",
+    "torch>=2.10.0",
+]
+
+# Dependencies for running examples (only what's actually used)
+examples = [
+    "maseval[smolagents,langgraph,llamaindex,anthropic,openai,google-genai,litellm,langfuse,disco]",
     # Additional integrations used in examples
     "langchain>=0.3.27",
     "langchain-google-genai>=2.1.12",
