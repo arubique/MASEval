@@ -160,6 +160,12 @@ def parse_args():
         default=256,
         help="PCA dimension for DISCO embeddings (default: 256)",
     )
+    parser.add_argument(
+        "--pad_to_size",
+        type=int,
+        default=None,
+        help="Pad predictions to this size with -inf (default: no padding, disco-public uses 31)",
+    )
 
     return parser.parse_args()
 
@@ -243,21 +249,26 @@ def save_predictions_for_disco(
     output_path: str,
     anchor_points: Optional[list] = None,
     n_choices: int = 4,
+    pad_to_size: Optional[int] = None,
 ):
     """Save predictions in format compatible with DISCO predictor.
 
-    Creates a predictions tensor of shape (1, n_questions, n_choices)
-    where the values are logits (1.0 for predicted choice, 0.0 for others).
+    Creates a predictions tensor of shape (1, n_questions, pad_to_size)
+    where the values are log-probabilities (0.0 for predicted choice, -inf for others).
+
+    Note: This produces a simplified format using 0/-inf instead of actual log-likelihoods.
+    For identical output to lm-evaluation-harness, use lm_eval_wrapper.py instead.
 
     Args:
         results: Benchmark results list.
         output_path: Path to save predictions pickle.
         anchor_points: Optional anchor points for ordering.
         n_choices: Number of answer choices (default 4 for A/B/C/D).
+        pad_to_size: Pad predictions to this size with -inf (default: no padding).
     """
     # Build predictions array
-    # For now, we create simple binary predictions (1.0 for predicted, 0.0 for others)
-    # A more sophisticated implementation would capture actual logits
+    # We use 0.0 for the predicted answer and -inf for others
+    # This mimics the log-probability format but with simplified values
 
     predictions_list = []
 
@@ -274,9 +285,10 @@ def save_predictions_for_disco(
         for doc_id in anchor_points:
             entry = result_by_doc_id.get(doc_id, {})
             predicted = entry.get("predicted", -1)
-            pred_vec = [0.0] * n_choices
+            # Use -inf for non-predicted, 0.0 for predicted (log-prob style)
+            pred_vec = [float("-inf")] * n_choices
             if 0 <= predicted < n_choices:
-                pred_vec[predicted] = 1.0
+                pred_vec[predicted] = 0.0
             predictions_list.append(pred_vec)
     else:
         # Use results in order
@@ -284,19 +296,30 @@ def save_predictions_for_disco(
             if res.get("status") == "success" and res.get("eval"):
                 for entry in res["eval"]:
                     predicted = entry.get("predicted", -1)
-                    pred_vec = [0.0] * n_choices
+                    pred_vec = [float("-inf")] * n_choices
                     if 0 <= predicted < n_choices:
-                        pred_vec[predicted] = 1.0
+                        pred_vec[predicted] = 0.0
                     predictions_list.append(pred_vec)
 
     predictions = np.array(predictions_list)
-    predictions = predictions.reshape(1, -1, n_choices)  # (1, n_questions, n_choices)
+
+    # Pad to specified size if requested
+    if pad_to_size is not None and predictions.shape[1] < pad_to_size:
+        padding = np.full(
+            (predictions.shape[0], pad_to_size - predictions.shape[1]),
+            float("-inf"),
+            dtype=predictions.dtype,
+        )
+        predictions = np.concatenate([predictions, padding], axis=1)
+
+    predictions = predictions.reshape(1, -1, predictions.shape[-1])  # (1, n_questions, n_choices)
 
     if output_path and output_path != "/dev/null":
         with open(output_path, "wb") as f:
             pickle.dump(predictions, f)
         print(f"Saved predictions tensor to {output_path}")
         print(f"  Shape: {predictions.shape}")
+        print(f"  Dtype: {predictions.dtype}")
     else:
         print(f"Built predictions tensor with shape: {predictions.shape}")
 
@@ -544,8 +567,9 @@ def main():
     if args.predictions_path or args.disco_prediction:
         predictions = save_predictions_for_disco(
             results=results,
-            output_path=args.predictions_path if args.predictions_path else "/dev/null",
+            output_path=args.predictions_path if args.predictions_path else None,
             anchor_points=anchor_points,
+            pad_to_size=args.pad_to_size,
         )
 
     # Run DISCO prediction if enabled
