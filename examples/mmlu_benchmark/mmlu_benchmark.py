@@ -208,12 +208,10 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         self._batch_size = batch_size
         self._model = None
         self._tokenizer = None
-        self._choice_token_ids_cache = None
 
     def _load_model(self):
         """Lazy load the model and tokenizer for log-likelihood computation."""
         if self._model is None:
-            import torch
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
             print(f"Loading model: {self._model_id}")
@@ -225,32 +223,48 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
             if self._tokenizer.pad_token is None:
                 self._tokenizer.pad_token = self._tokenizer.eos_token
 
-            # Load model without device_map (doesn't require accelerate)
+            # Load model with torch_dtype="auto" to match lm-evaluation-harness exactly
+            # This uses the model's native dtype (bfloat16 for most modern models)
             # Then move to device manually
             self._model = AutoModelForCausalLM.from_pretrained(
                 self._model_id,
                 trust_remote_code=self._trust_remote_code,
-                torch_dtype=torch.float16,
+                torch_dtype="auto",
             )
             self._model = self._model.to(self._device)
             self._model.eval()
 
-            # Pre-compute token IDs for answer choices A, B, C, D
-            self._choice_token_ids_cache = {}
-            for choice in ["A", "B", "C", "D"]:
-                tokens = self._tokenizer.encode(choice, add_special_tokens=False)
-                self._choice_token_ids_cache[choice] = tokens[0] if tokens else None
-
-            print(f"Answer token IDs: {self._choice_token_ids_cache}")
+            # Note: We don't pre-cache choice token IDs here because they depend on context.
+            # Token IDs are computed dynamically in _get_choice_token_id_in_context()
+            # to match lm-evaluation-harness behavior exactly.
 
         return self._model, self._tokenizer
 
-    @property
-    def _choice_token_ids(self):
-        """Get cached choice token IDs."""
-        if self._choice_token_ids_cache is None:
-            self._load_model()
-        return self._choice_token_ids_cache
+    def _get_choice_token_id_separate(self, choice: str) -> int:
+        """Get the token ID for a choice when tokenized SEPARATELY.
+
+        CRITICAL: lm-evaluation-harness encodes context and continuation separately,
+        then concatenates. This means "A" is always tokenized standalone (token 330),
+        NOT in context after "Answer:" (which would be token 28741).
+
+        We must match this behavior to get identical log-likelihood values.
+
+        Args:
+            choice: The choice string (e.g., "A").
+
+        Returns:
+            Token ID for the choice (standalone tokenization).
+        """
+        _, tokenizer = self._load_model()
+
+        # Tokenize choice ALONE (not in context) - this is how lm-eval does it
+        choice_tokens = tokenizer.encode(choice, add_special_tokens=False)
+
+        if len(choice_tokens) == 1:
+            return choice_tokens[0]
+        else:
+            # Multi-token choice - return None to trigger multi-token fallback
+            return None
 
     def _compute_logprobs_single_token(self, prompt: str, choices: list) -> list:
         """Compute log-likelihoods using single-token optimization.
@@ -259,7 +273,9 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         forward pass: compute logits for the prompt, then look up the
         log-probability of each answer token at the last position.
 
-        This is the key optimization from lm-evaluation-harness.
+        IMPORTANT: To match lm-evaluation-harness exactly:
+        1. Context is encoded WITH special tokens (BOS) - add_special_tokens=True
+        2. Continuation tokens are encoded SEPARATELY (standalone) - add_special_tokens=False
 
         Args:
             prompt: The prompt/question text.
@@ -272,8 +288,8 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
 
         model, tokenizer = self._load_model()
 
-        # Tokenize the prompt
-        input_ids = tokenizer.encode(prompt, add_special_tokens=False, return_tensors="pt")
+        # Tokenize the prompt WITH special tokens (BOS) to match lm-eval
+        input_ids = tokenizer.encode(prompt, add_special_tokens=True, return_tensors="pt")
         input_ids = input_ids.to(self._device)
 
         with torch.no_grad():
@@ -286,14 +302,15 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
             log_probs = torch.nn.functional.log_softmax(last_logits, dim=-1)
 
             # Extract log-probabilities for each answer choice
+            # Use SEPARATE tokenization to match lm-evaluation-harness exactly
+            # (lm-eval encodes context and continuation separately, then concatenates)
             logprobs = []
             for choice in choices:
-                token_id = self._choice_token_ids.get(choice)
+                token_id = self._get_choice_token_id_separate(choice)
                 if token_id is not None:
                     logprobs.append(log_probs[token_id].item())
                 else:
-                    # Fallback: encode the choice and sum log-probs
-                    # This handles multi-token answers if needed
+                    # Fallback: multi-token choice, need different computation
                     logprobs.append(float("-inf"))
 
         return logprobs
@@ -315,11 +332,12 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         model, tokenizer = self._load_model()
 
         # Batch encode with left padding
+        # Use add_special_tokens=True to match lm-evaluation-harness (adds BOS token)
         encoding = tokenizer(
             prompts,
             padding="longest",
             return_tensors="pt",
-            add_special_tokens=False,
+            add_special_tokens=True,
         )
         input_ids = encoding["input_ids"].to(self._device)
         attention_mask = encoding["attention_mask"].to(self._device)
@@ -347,10 +365,11 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
                 log_probs = torch.nn.functional.log_softmax(last_logits, dim=-1)
 
                 # Extract log-probabilities for each answer choice
+                # Use SEPARATE tokenization to match lm-evaluation-harness exactly
                 choices = choices_list[i]
                 item_logprobs = []
                 for choice in choices:
-                    token_id = self._choice_token_ids.get(choice)
+                    token_id = self._get_choice_token_id_separate(choice)
                     if token_id is not None:
                         item_logprobs.append(log_probs[token_id].item())
                     else:
@@ -381,17 +400,18 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         full_texts = [prompt + choice for choice in choices]
 
         # Encode all at once with padding
+        # Use add_special_tokens=True to match lm-evaluation-harness (adds BOS token)
         encoding = tokenizer(
             full_texts,
             padding="longest",
             return_tensors="pt",
-            add_special_tokens=False,
+            add_special_tokens=True,
         )
         input_ids = encoding["input_ids"].to(self._device)
         attention_mask = encoding["attention_mask"].to(self._device)
 
         # Also encode just the prompt to know where continuation starts
-        prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
+        prompt_ids = tokenizer.encode(prompt, add_special_tokens=True)
         prompt_len = len(prompt_ids)
 
         with torch.no_grad():
@@ -405,7 +425,6 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
             all_logprobs = []
             for i, choice in enumerate(choices):
                 choice_ids = tokenizer.encode(choice, add_special_tokens=False)
-                choice_len = len(choice_ids)
 
                 # Sum log-probs for the continuation tokens
                 # Token at position j is predicted by logits at position j-1
@@ -435,11 +454,11 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         prompt = environment.get_prompt()
         choices = environment.state.get("choices", ["A", "B", "C", "D"])
 
-        # Load model to check if single-token optimization applies
+        # Load model
         self._load_model()
 
-        # Check if all choices are single tokens
-        all_single_token = all(choice in self._choice_token_ids and self._choice_token_ids[choice] is not None for choice in choices)
+        # Check if all choices are single tokens (using separate tokenization like lm-eval)
+        all_single_token = all(self._get_choice_token_id_separate(choice) is not None for choice in choices)
 
         if all_single_token:
             # Use optimized single-token path (one forward pass)

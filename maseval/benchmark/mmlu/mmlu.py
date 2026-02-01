@@ -390,6 +390,24 @@ class MMLUAgentAdapter(AgentAdapter):
         """Get agent messages."""
         return self.agent._messages
 
+    def gather_traces(self) -> Dict[str, Any]:
+        """Gather execution traces from this agent.
+
+        Override to handle plain list messages (not MessageHistory).
+        """
+        from maseval.core.tracing import TraceableMixin
+
+        messages = self.get_messages()
+        return {
+            **TraceableMixin.gather_traces(self),
+            "name": self.name,
+            "agent_type": type(self.agent).__name__,
+            "message_count": len(messages),
+            "messages": messages,  # Already a list, no need for to_list()
+            "callbacks": [type(cb).__name__ for cb in self.callbacks],
+            "logs": self.logs,
+        }
+
 
 # =============================================================================
 # Benchmark
