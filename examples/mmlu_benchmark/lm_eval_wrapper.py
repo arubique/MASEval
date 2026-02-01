@@ -16,6 +16,7 @@ Usage:
 """
 
 import pickle
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -70,19 +71,17 @@ def evaluate_with_lm_eval(
     Returns:
         Tuple of (predictions, correctness) numpy arrays.
     """
-    # Add disco-public to path for imports
-    disco_scripts = Path(disco_public_path) / "scripts"
+    # Add disco-public to path for imports. Order matters: disco_root must be first
+    # so "from scripts import run_lm_eval" resolves to disco-public/scripts, not
+    # lm-evaluation-harness/scripts.
     disco_root = Path(disco_public_path)
+    disco_scripts = disco_root / "scripts"
+    lm_eval_path = disco_root / "external" / "lm-evaluation-harness"
 
-    if str(disco_scripts) not in sys.path:
-        sys.path.insert(0, str(disco_scripts))
-    if str(disco_root) not in sys.path:
-        sys.path.insert(0, str(disco_root))
-
-    # Import lm-eval harness
-    lm_eval_path = Path(disco_public_path) / "external" / "lm-evaluation-harness"
-    if str(lm_eval_path) not in sys.path:
-        sys.path.insert(0, str(lm_eval_path))
+    for path in (disco_scripts, lm_eval_path, disco_root):
+        path_str = str(path)
+        if path_str not in sys.path:
+            sys.path.insert(0, path_str)
 
     try:
         import lm_eval
@@ -141,20 +140,19 @@ def evaluate_with_lm_eval(
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        eval_args.extend(["--target_outputs_path", str(output_path).replace(".pkl", "_target_outputs.pkl")])
         eval_args.extend(["--output_path", tmpdir])
+        eval_args.extend(["--predictions_path", str(output_path)])
+        eval_args.append("--metric")
+        eval_args.append("acc_norm")
+        eval_args.append("--force_recompute")
 
-        # Run lm_eval
-        print(f"Running lm-eval with args: {' '.join(eval_args)}")
+        # Run disco-public's run_lm_eval.py as a subprocess so scripts.* resolves to disco-public/scripts
+        # (in-process import would see lm-evaluation-harness/scripts first).
+        print(f"Running run_lm_eval with args: {' '.join(eval_args)}")
 
-        # Use lm_eval CLI
-        from lm_eval.__main__ import cli_evaluate
-
-        old_argv = sys.argv
-        sys.argv = ["lm_eval"] + eval_args
-        try:
-            cli_evaluate()
-        finally:
-            sys.argv = old_argv
+        cmd = [sys.executable, str(disco_root / "scripts" / "run_lm_eval.py")] + eval_args
+        subprocess.run(cmd, cwd=str(disco_root), check=True)
 
         # Find and load results
         jsonl_path = find_jsonl_file_in_directory(tmpdir)
