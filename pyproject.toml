@@ -9,20 +9,19 @@ description = "A library for multi-agent systems evaluation and benchmarking."
 authors = [{ name = "Cornelius Emde", email = "cornelius@parameterlab.de" }]
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "gitpython>=3.1.0",
+    "gitpython==3.1.46",
     "tqdm>=4.66.0",
     "rich>=14.1.0",
     "pydantic>=2.10.6",
@@ -40,11 +39,11 @@ camel = ["camel-ai>=0.2.0"]
 anthropic = ["anthropic>=0.40.0"]
 openai = ["openai>=1.107.2"]
 google-genai = ["google-genai>=1.37.0"]
-transformers = ["transformers>=4.37.0"]
+transformers = ["transformers==4.57.1"]
 litellm = ["litellm>=1.0.0"]
 
 # Logging
-wandb = ["wandb>=0.15.0"]
+wandb = ["wandb==0.24.0"]
 langfuse = ["langfuse>=3.3.4"]
 
 # Benchmarks
@@ -88,16 +87,18 @@ examples = [
 # DISCO prediction (for MMLU benchmark example)
 disco = [
     "click>=8.1.0",
-    "datasets>=2.14.0",
+    "datasets==4.4.1",
     "gdown>=4.6.0",
     "h5py>=3.0.0",
     "ipython>=8.0.0",
     "jsonlines>=4.0.0",
+    "lm-eval @ git+https://github.com/arubique/lm-evaluation-harness.git",
     "matplotlib>=3.5.0",
     "scikit-learn>=1.7.2",
     "scipy>=1.11.0",
-    "stnd @ git+https://github.com/arubique/stnd.git",
-    "torch>=2.10.0",
+    "stnd @ git+https://github.com/arubique/stnd.git@0d23b52f7742c08b28be560d2d52d450fcd274b7",
+    "tiktoken>=0.5.0",
+    "torch==2.9.1",
     "torchvision>=0.15.0",
     "typer>=0.9.0",
     "umap-learn>=0.5.0",
@@ -116,7 +117,7 @@ examples = [
     "jupyter>=1.0.0",
     "ipykernel>=6.0.0",
     "ipywidgets>=8.0.0",
-    "accelerate>=1.12.0",
+    "accelerate==1.11.0",
 ]
 
 # Complete installation with absolutely everything (uses self-reference for DRY)
@@ -127,6 +128,31 @@ all = ["maseval[examples,transformers,wandb,multiagentbench]"]
 "Bug Tracker" = "https://github.com/parameterlab/MASEval/issues"
 "Documentation" = "https://maseval.readthedocs.io/en/stable/"
 "Changelog" = "https://github.com/parameterlab/MASEval/blob/main/CHANGELOG.md"
+
+# Align transitive deps with disco-public env (disco_env_lm_eval) for MMLU identity test
+[tool.uv]
+override-dependencies = [
+    "absl-py==2.3.1",
+    "aiohttp==3.13.3",
+    "anyio==4.12.1",
+    "certifi==2026.1.4",
+    "filelock==3.20.3",
+    "google-auth==2.41.1",
+    "google-auth-oauthlib==1.2.3",
+    "httplib2==0.31.1",
+    "numpy==2.4.1",
+    "nvidia-nvshmem-cu12==3.3.20",
+    "pillow==12.1.0",
+    "protobuf==6.33.4",
+    "psutil==7.2.1",
+    "pyarrow==22.0.0",
+    "pyparsing==3.3.1",
+    "regex==2026.1.15",
+    "sentry-sdk==2.49.0",
+    "tokenizers==0.22.2",
+    "triton==3.5.1",
+    "urllib3==2.6.3",
+]
 
 [dependency-groups]
 # Development tools (linting, testing) - for contributors only
