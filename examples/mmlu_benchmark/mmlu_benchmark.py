@@ -166,6 +166,11 @@ def parse_args():
         default=None,
         help="Pad predictions to this size with -inf (default: no padding, disco-public uses 31)",
     )
+    parser.add_argument(
+        "--use_lmeval_batching",
+        action="store_true",
+        help="Use lm-evaluation-harness batching for exact numerical match. This batches ALL requests together before computing logprobs.",
+    )
 
     return parser.parse_args()
 
@@ -266,16 +271,51 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
             # Multi-token choice - return None to trigger multi-token fallback
             return None
 
+    def _encode_pair(self, context: str, continuation: str) -> tuple:
+        """Encode a context-continuation pair like lm-evaluation-harness.
+
+        This matches lm-eval's _encode_pair method exactly:
+        1. Encode whole = context + continuation
+        2. Encode context alone
+        3. continuation_enc = whole[len(context_enc):]
+
+        This handles tokenization boundary effects correctly.
+
+        Args:
+            context: The context/prompt string.
+            continuation: The continuation string (e.g., " A" with target_delimiter).
+
+        Returns:
+            Tuple of (context_enc, continuation_enc) token lists.
+        """
+        _, tokenizer = self._load_model()
+
+        # Handle trailing spaces in context (move to continuation)
+        n_spaces = len(context) - len(context.rstrip())
+        if n_spaces > 0:
+            continuation = context[-n_spaces:] + continuation
+            context = context[:-n_spaces]
+
+        # Encode whole string together, then split
+        whole_enc = tokenizer.encode(context + continuation, add_special_tokens=True)
+        context_enc = tokenizer.encode(context, add_special_tokens=True)
+
+        # Continuation tokens are what's left after context
+        continuation_enc = whole_enc[len(context_enc) :]
+
+        return context_enc, continuation_enc
+
     def _compute_logprobs_single_token(self, prompt: str, choices: list) -> list:
         """Compute log-likelihoods using single-token optimization.
 
-        For MCQ with single-letter answers (A, B, C, D), we only need ONE
-        forward pass: compute logits for the prompt, then look up the
-        log-probability of each answer token at the last position.
+        For MCQ with single-letter answers (A, B, C, D), we can compute all
+        choices in one forward pass since they share the same context.
 
-        IMPORTANT: To match lm-evaluation-harness exactly:
-        1. Context is encoded WITH special tokens (BOS) - add_special_tokens=True
-        2. Continuation tokens are encoded SEPARATELY (standalone) - add_special_tokens=False
+        IMPORTANT: To match lm-evaluation-harness EXACTLY:
+        1. Use target_delimiter=" " before choices (e.g., " A" not "A")
+        2. Use _encode_pair to handle tokenization boundaries correctly
+        3. Input = (context + continuation)[:-1]
+        4. Apply log_softmax to get log probabilities
 
         Args:
             prompt: The prompt/question text.
@@ -286,39 +326,54 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         """
         import torch
 
-        model, tokenizer = self._load_model()
+        model, _ = self._load_model()
 
-        # Tokenize the prompt WITH special tokens (BOS) to match lm-eval
-        input_ids = tokenizer.encode(prompt, add_special_tokens=True, return_tensors="pt")
-        input_ids = input_ids.to(self._device)
+        # lm-eval uses target_delimiter=" " for multiple choice tasks
+        target_delimiter = " "
+
+        # Encode first choice to get the shared context
+        first_continuation = f"{target_delimiter}{choices[0]}"
+        context_enc, first_cont_enc = self._encode_pair(prompt, first_continuation)
+
+        # Build input: (context + continuation)[:-1]
+        full_sequence = context_enc + first_cont_enc
+        input_tokens = full_sequence[:-1]  # Remove last token
+
+        input_ids = torch.tensor([input_tokens], dtype=torch.long, device=self._device)
 
         with torch.no_grad():
             outputs = model(input_ids)
-            # Get logits at the last position (where the answer token would be predicted)
-            # logits shape: (batch, seq_len, vocab_size)
-            last_logits = outputs.logits[0, -1, :]  # (vocab_size,)
+            logits = outputs.logits[0]  # (seq_len, vocab_size)
 
-            # Compute log-softmax once
-            log_probs = torch.nn.functional.log_softmax(last_logits, dim=-1)
+            # Select logits at position where continuation is predicted
+            # For single-token continuation, this is the last position
+            inplen = len(input_tokens)
+            contlen = len(first_cont_enc)
+            selected_logits = logits[inplen - contlen : inplen]
 
-            # Extract log-probabilities for each answer choice
-            # Use SEPARATE tokenization to match lm-evaluation-harness exactly
-            # (lm-eval encodes context and continuation separately, then concatenates)
+            # Compute log-softmax
+            log_probs = torch.nn.functional.log_softmax(selected_logits, dim=-1)
+
+            # Get log prob for each choice's continuation token
             logprobs = []
             for choice in choices:
-                token_id = self._get_choice_token_id_separate(choice)
-                if token_id is not None:
-                    logprobs.append(log_probs[token_id].item())
-                else:
-                    # Fallback: multi-token choice, need different computation
-                    logprobs.append(float("-inf"))
+                continuation = f"{target_delimiter}{choice}"
+                _, cont_enc = self._encode_pair(prompt, continuation)
+
+                # Sum log probs for multi-token continuations
+                total = 0.0
+                for i, token_id in enumerate(cont_enc):
+                    total += log_probs[i, token_id].item()
+                logprobs.append(total)
 
         return logprobs
 
     def _compute_logprobs_batched(self, prompts: list, choices_list: list) -> list:
         """Compute log-likelihoods for a batch of prompts.
 
-        Batches multiple questions together for efficient GPU utilization.
+        For exact match with lm-evaluation-harness, we process each prompt
+        individually using _compute_logprobs_single_token which uses the
+        correct _encode_pair tokenization logic.
 
         Args:
             prompts: List of prompt strings.
@@ -327,63 +382,105 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         Returns:
             List of log-likelihood lists, one per prompt.
         """
-        import torch
-
-        model, tokenizer = self._load_model()
-
-        # Batch encode with left padding
-        # Use add_special_tokens=True to match lm-evaluation-harness (adds BOS token)
-        encoding = tokenizer(
-            prompts,
-            padding="longest",
-            return_tensors="pt",
-            add_special_tokens=True,
-        )
-        input_ids = encoding["input_ids"].to(self._device)
-        attention_mask = encoding["attention_mask"].to(self._device)
-
-        with torch.no_grad():
-            outputs = model(input_ids, attention_mask=attention_mask)
-            # logits shape: (batch, seq_len, vocab_size)
-            logits = outputs.logits
-
-            # For left-padded inputs, we need to find the actual last position for each sequence
-            # The last real token is where attention_mask is 1
-            # For each sequence, get logits at position (seq_len - 1) accounting for padding
-            batch_size = input_ids.shape[0]
-            all_logprobs = []
-
-            for i in range(batch_size):
-                # Find the last non-padded position
-                seq_len = attention_mask[i].sum().item()
-                last_pos = seq_len - 1
-
-                # Get logits at the last real position
-                last_logits = logits[i, last_pos, :]
-
-                # Compute log-softmax
-                log_probs = torch.nn.functional.log_softmax(last_logits, dim=-1)
-
-                # Extract log-probabilities for each answer choice
-                # Use SEPARATE tokenization to match lm-evaluation-harness exactly
-                choices = choices_list[i]
-                item_logprobs = []
-                for choice in choices:
-                    token_id = self._get_choice_token_id_separate(choice)
-                    if token_id is not None:
-                        item_logprobs.append(log_probs[token_id].item())
-                    else:
-                        item_logprobs.append(float("-inf"))
-
-                all_logprobs.append(item_logprobs)
+        # For exact match with lm-eval, process individually
+        # This ensures correct tokenization via _encode_pair
+        all_logprobs = []
+        for prompt, choices in zip(prompts, choices_list):
+            logprobs = self._compute_logprobs_single_token(prompt, choices)
+            all_logprobs.append(logprobs)
 
         return all_logprobs
+
+    def precompute_all_logprobs_lmeval(self, tasks) -> dict:
+        """Precompute log-likelihoods for ALL tasks using lm-eval's batching.
+
+        CRITICAL: lm-evaluation-harness batches ALL requests together and uses
+        its Collator class to reorder/group them. This affects floating-point
+        precision for some edge cases. To get EXACT matches, we must process
+        ALL requests together in a single batch.
+
+        This method:
+        1. Creates Instance objects for all task/choice combinations
+        2. Calls lm-eval's HFLM.loglikelihood() with ALL instances
+        3. Returns a mapping from doc_id to logprobs
+
+        Args:
+            tasks: Iterable of Task objects with prompt and choices.
+
+        Returns:
+            Dict mapping doc_id -> list of log-likelihoods for each choice.
+        """
+        import sys
+
+        # Add lm-eval to path
+        sys.path.insert(0, "/home/oh/arubinstein17/github/disco-public")
+        sys.path.insert(0, "/home/oh/arubinstein17/github/disco-public/external/lm-evaluation-harness")
+
+        from lm_eval.models.huggingface import HFLM
+        from lm_eval.api.instance import Instance
+
+        # Create HFLM model (this handles model loading internally)
+        lm = HFLM(
+            pretrained=self._model_id,
+            trust_remote_code=self._trust_remote_code,
+            batch_size=self._batch_size,
+            device=self._device,
+        )
+
+        # lm-eval uses target_delimiter=" " for multiple choice tasks
+        target_delimiter = " "
+        choices = ["A", "B", "C", "D"]
+        continuations = [f"{target_delimiter}{c}" for c in choices]
+
+        # Build ALL instances like lm-eval task system does
+        all_instances = []
+        instance_map = {}  # (doc_id, choice_idx) -> position in results
+
+        for task in tasks:
+            doc_id = task.metadata.get("doc_id")
+            # Get prompt from task - use full_prompt from environment_data if available
+            if self.use_full_prompt and "full_prompt" in task.environment_data:
+                prompt = task.environment_data["full_prompt"]
+            else:
+                prompt = task.query
+
+            for i, cont in enumerate(continuations):
+                inst = Instance(
+                    request_type="loglikelihood",
+                    doc={"doc_id": doc_id},
+                    arguments=(prompt, cont),
+                    idx=i,
+                    metadata=("mmlu_prompts", doc_id, 1),
+                )
+                instance_map[(doc_id, i)] = len(all_instances)
+                all_instances.append(inst)
+
+        print(f"Precomputing logprobs for {len(all_instances)} instances ({len(all_instances) // len(choices)} tasks)")
+
+        # Call loglikelihood with ALL instances at once - this is the key!
+        results = lm.loglikelihood(all_instances)
+
+        # Map results back to doc_ids
+        doc_logprobs = {}
+        for task in tasks:
+            doc_id = task.metadata.get("doc_id")
+            logprobs = []
+            for i in range(len(choices)):
+                pos = instance_map[(doc_id, i)]
+                logprob, _ = results[pos]
+                logprobs.append(logprob)
+            doc_logprobs[doc_id] = logprobs
+
+        # Store for later use
+        self._precomputed_logprobs = doc_logprobs
+
+        return doc_logprobs
 
     def _compute_logprobs_multi_token(self, prompt: str, choices: list) -> list:
         """Compute log-likelihoods for multi-token continuations.
 
         This is the fallback for when answer choices have multiple tokens.
-        Batches all choices together and computes log-probs in parallel.
+        Uses _encode_pair to match lm-evaluation-harness exactly.
 
         Args:
             prompt: The prompt/question text.
@@ -394,47 +491,42 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         """
         import torch
 
-        model, tokenizer = self._load_model()
+        model, _ = self._load_model()
 
-        # Build batch: prompt + each choice
-        full_texts = [prompt + choice for choice in choices]
+        # lm-eval uses target_delimiter=" " for multiple choice tasks
+        target_delimiter = " "
 
-        # Encode all at once with padding
-        # Use add_special_tokens=True to match lm-evaluation-harness (adds BOS token)
-        encoding = tokenizer(
-            full_texts,
-            padding="longest",
-            return_tensors="pt",
-            add_special_tokens=True,
-        )
-        input_ids = encoding["input_ids"].to(self._device)
-        attention_mask = encoding["attention_mask"].to(self._device)
+        all_logprobs = []
+        for choice in choices:
+            continuation = f"{target_delimiter}{choice}"
 
-        # Also encode just the prompt to know where continuation starts
-        prompt_ids = tokenizer.encode(prompt, add_special_tokens=True)
-        prompt_len = len(prompt_ids)
+            # Use _encode_pair for correct tokenization
+            context_enc, continuation_enc = self._encode_pair(prompt, continuation)
 
-        with torch.no_grad():
-            outputs = model(input_ids, attention_mask=attention_mask)
-            logits = outputs.logits
+            # Build input: (context + continuation)[:-1]
+            full_sequence = context_enc + continuation_enc
+            input_tokens = full_sequence[:-1]
 
-            # Compute log-softmax over vocab dimension
-            log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+            input_ids = torch.tensor([input_tokens], dtype=torch.long, device=self._device)
 
-            # For each choice, sum log-probs of continuation tokens
-            all_logprobs = []
-            for i, choice in enumerate(choices):
-                choice_ids = tokenizer.encode(choice, add_special_tokens=False)
+            with torch.no_grad():
+                outputs = model(input_ids)
+                logits = outputs.logits[0]  # (seq_len, vocab_size)
 
-                # Sum log-probs for the continuation tokens
-                # Token at position j is predicted by logits at position j-1
-                total_logprob = 0.0
-                for j, token_id in enumerate(choice_ids):
-                    pos = prompt_len + j - 1  # Position in logits that predicts this token
-                    if pos >= 0:
-                        total_logprob += log_probs[i, pos, token_id].item()
+                # Select continuation logits
+                inplen = len(input_tokens)
+                contlen = len(continuation_enc)
+                selected = logits[inplen - contlen : inplen]
 
-                all_logprobs.append(total_logprob)
+                # Compute log-softmax
+                log_probs = torch.nn.functional.log_softmax(selected, dim=-1)
+
+                # Sum log probs for all continuation tokens
+                total = 0.0
+                for i, token_id in enumerate(continuation_enc):
+                    total += log_probs[i, token_id].item()
+
+                all_logprobs.append(total)
 
         return all_logprobs
 
@@ -447,24 +539,62 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
     ):
         """Execute log-likelihood based MCQ evaluation.
 
-        Uses single-forward-pass optimization for single-token answers,
-        or multi-token batched computation as fallback.
+        Uses precomputed logprobs if available (for exact lm-eval match),
+        otherwise falls back to single-forward-pass optimization for
+        single-token answers, or multi-token batched computation.
         """
         # Get the prompt from environment
         prompt = environment.get_prompt()
         choices = environment.state.get("choices", ["A", "B", "C", "D"])
+        doc_id = task.metadata.get("doc_id") if task else None
 
+        # Check if we have precomputed logprobs (for exact lm-eval match)
+        if hasattr(self, "_precomputed_logprobs") and doc_id is not None:
+            logprobs = self._precomputed_logprobs.get(doc_id)
+            if logprobs is not None:
+                # Use precomputed values for exact match
+                best_idx = logprobs.index(max(logprobs))
+                answer = choices[best_idx]
+
+                # Store logprobs in environment for later retrieval
+                environment.state["logprobs"] = logprobs
+                environment.state["predicted_idx"] = best_idx
+
+                # Record in agent messages for tracing
+                agent = agents[0]
+                agent.agent._messages.append({"role": "user", "content": prompt})
+                agent.agent._messages.append(
+                    {
+                        "role": "assistant",
+                        "content": answer,
+                        "logprobs": logprobs,
+                    }
+                )
+
+                return answer
+
+        # Fall back to computing logprobs on-the-fly
         # Load model
         self._load_model()
 
-        # Check if all choices are single tokens (using separate tokenization like lm-eval)
-        all_single_token = all(self._get_choice_token_id_separate(choice) is not None for choice in choices)
+        # lm-eval uses target_delimiter=" " for multiple choice tasks
+        target_delimiter = " "
+
+        # Check if all choices result in single-token continuations
+        # using _encode_pair to get the correct tokenization
+        all_single_token = True
+        for choice in choices:
+            continuation = f"{target_delimiter}{choice}"
+            _, cont_enc = self._encode_pair(prompt, continuation)
+            if len(cont_enc) != 1:
+                all_single_token = False
+                break
 
         if all_single_token:
             # Use optimized single-token path (one forward pass)
             logprobs = self._compute_logprobs_single_token(prompt, choices)
         else:
-            # Fall back to multi-token batched computation
+            # Fall back to multi-token computation
             logprobs = self._compute_logprobs_multi_token(prompt, choices)
 
         # Select the choice with highest log-probability
@@ -832,6 +962,13 @@ def main():
         callbacks=[logger],
         num_workers=args.num_workers,
     )
+
+    # Optionally precompute logprobs using lm-eval batching for exact match
+    if args.use_lmeval_batching:
+        print("\nPrecomputing logprobs using lm-eval batching (for exact numerical match)...")
+        # Get task list for precomputation
+        task_list = list(tasks._anchor_tasks if hasattr(tasks, "_anchor_tasks") else tasks._tasks)
+        benchmark.precompute_all_logprobs_lmeval(task_list)
 
     # Run evaluation
     print("\nRunning evaluation...")
