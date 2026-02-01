@@ -308,20 +308,20 @@ class TestMASEvalPredictionsComparison:
         print(f"MASEval argmax distribution: {np.bincount(maseval_argmax, minlength=4)}")
         print(f"Reference argmax distribution: {np.bincount(reference_argmax, minlength=4)}")
 
-        # Text generation and log-likelihood scoring can give different results
-        # We expect at least 50% agreement for the same model (random would be 25%)
-        assert match_rate >= 0.5, f"Answer match rate {match_rate:.2%} is too low. Expected >= 50% agreement between evaluation methods."
+        # With contextual token ID computation, MASEval should produce identical
+        # predictions to lm-evaluation-harness (both use log-likelihood scoring)
+        assert match_rate == 1.0, f"Answer match rate {match_rate:.2%} is not 100%. Check that contextual token IDs are being used correctly."
 
     def test_disco_prediction_produces_valid_accuracy(self, maseval_predictions, reference_predictions):
         """DISCO prediction from MASEval predictions should produce valid accuracy.
 
-        Note: MASEval predictions use 0/-inf values (one-hot style) while disco-public
-        uses actual log-likelihoods. The DISCO predictor is trained on log-likelihood
-        distributions, so predictions from one-hot style inputs will be less accurate.
+        MASEval now uses the same log-likelihood scoring as lm-evaluation-harness,
+        so predictions should contain actual log-likelihoods (not 0/-inf values).
 
         This test checks that:
         1. MASEval predictions produce a valid (0-1) accuracy prediction
         2. Reference predictions produce a reasonable accuracy for the model
+        3. Both predictions are very similar (since MASEval matches lm-eval)
         """
         try:
             import torch
@@ -361,14 +361,13 @@ class TestMASEvalPredictionsComparison:
         print(f"DISCO predicted accuracy from reference predictions: {reference_acc:.4f}")
         assert 0.4 <= reference_acc <= 0.8, f"Reference accuracy {reference_acc} seems unreasonable"
 
-        # MASEval predictions use 0/-inf which may not work well with DISCO
-        # since it's trained on actual log-likelihoods. We just check it doesn't crash.
-        try:
-            maseval_acc = compute_disco_accuracy(maseval_predictions)
-            print(f"DISCO predicted accuracy from MASEval predictions: {maseval_acc:.4f}")
-            print(f"Difference: {abs(maseval_acc - reference_acc):.4f}")
-            # Just check it's a valid number
-            assert not np.isnan(maseval_acc), "MASEval DISCO prediction is NaN"
-        except ValueError as e:
-            # If it fails due to NaN from softmax of -inf values, that's expected
-            pytest.skip(f"MASEval predictions not compatible with DISCO transform: {e}")
+        # MASEval predictions should now have actual log-likelihoods (matching lm-eval)
+        maseval_acc = compute_disco_accuracy(maseval_predictions)
+        print(f"DISCO predicted accuracy from MASEval predictions: {maseval_acc:.4f}")
+        print(f"Difference: {abs(maseval_acc - reference_acc):.4f}")
+
+        # Both should produce similar predictions since MASEval matches lm-eval
+        assert not np.isnan(maseval_acc), "MASEval DISCO prediction is NaN"
+        assert abs(maseval_acc - reference_acc) < 0.05, (
+            f"DISCO predictions differ too much: MASEval={maseval_acc:.4f}, reference={reference_acc:.4f}. Expected difference < 0.05."
+        )
