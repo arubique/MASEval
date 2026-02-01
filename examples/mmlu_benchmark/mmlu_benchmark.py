@@ -541,15 +541,25 @@ def save_predictions_for_disco(
             pred_vec[predicted] = 0.0
         return pred_vec
 
+    def extract_eval_entries(res):
+        """Extract evaluation entries from a result dict."""
+        eval_data = res.get("eval")
+        if eval_data is None:
+            return []
+        if isinstance(eval_data, list):
+            return eval_data
+        if isinstance(eval_data, dict):
+            return [eval_data]
+        return []
+
     if anchor_points is not None:
         # Order results by anchor points
         result_by_doc_id = {}
         for res in results:
-            if res.get("status") == "success" and res.get("eval"):
-                for entry in res["eval"]:
-                    doc_id = entry.get("doc_id")
-                    if doc_id is not None:
-                        result_by_doc_id[doc_id] = entry
+            for entry in extract_eval_entries(res):
+                doc_id = entry.get("doc_id")
+                if doc_id is not None:
+                    result_by_doc_id[doc_id] = entry
 
         for doc_id in anchor_points:
             entry = result_by_doc_id.get(doc_id, {})
@@ -558,10 +568,9 @@ def save_predictions_for_disco(
     else:
         # Use results in order
         for res in results:
-            if res.get("status") == "success" and res.get("eval"):
-                for entry in res["eval"]:
-                    pred_vec = get_pred_vec(entry, n_choices)
-                    predictions_list.append(pred_vec)
+            for entry in extract_eval_entries(res):
+                pred_vec = get_pred_vec(entry, n_choices)
+                predictions_list.append(pred_vec)
 
     predictions = np.array(predictions_list)
 
