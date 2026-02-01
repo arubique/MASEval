@@ -285,32 +285,50 @@ class TestMASEvalPredictionsComparison:
         padding = maseval_predictions[0, :, 4:]
         assert np.all(np.isinf(padding) & (padding < 0)), "Padding should be -inf"
 
-    def test_maseval_predictions_argmax_matches_reference(self, maseval_predictions, reference_predictions):
-        """Compare predicted answers between MASEval and disco-public.
+    def test_maseval_predictions_match_reference_exactly(self, maseval_predictions, reference_predictions):
+        """Compare log-likelihood values between MASEval and disco-public (lm-eval).
 
-        Note: MASEval uses text generation while disco-public uses log-likelihood
-        scoring. These methods can produce different results even with the same model,
-        so we only check for reasonable correlation, not exact match.
+        MASEval now uses identical computation to lm-evaluation-harness:
+        - Same tokenization (BOS token, separate context/continuation encoding)
+        - Same model dtype (torch_dtype="auto" -> bfloat16)
+        - Same log-softmax computation
+
+        This test verifies the actual log-likelihood values are nearly identical,
+        not just that argmax matches.
         """
-        # Get argmax for first 4 columns (A, B, C, D choices)
+        # Get choice columns (A, B, C, D) - exclude padding
         maseval_choices = maseval_predictions[0, :, :4]
         reference_choices = reference_predictions[0, :, :4]
 
+        # Check absolute closeness of log-likelihood values
+        # Use rtol=1e-3 and atol=1e-3 to allow for minor floating-point differences
+        # is_close = np.allclose(maseval_choices, reference_choices, rtol=1e-3, atol=1e-3)
+        is_close = np.allclose(maseval_choices, reference_choices)
+
+        # Compute statistics for debugging
+        abs_diff = np.abs(maseval_choices - reference_choices)
+        max_diff = abs_diff.max()
+        mean_diff = abs_diff.mean()
+
+        # Find where max difference occurs
+        max_idx = np.unravel_index(abs_diff.argmax(), abs_diff.shape)
+
+        print(f"Max absolute difference: {max_diff:.6f} at index {max_idx}")
+        print(f"Mean absolute difference: {mean_diff:.6f}")
+        print("Sample comparison at max diff location:")
+        print(f"  MASEval:   {maseval_choices[max_idx[0], :]}")
+        print(f"  Reference: {reference_choices[max_idx[0], :]}")
+
+        # Also check argmax agreement for reference
         maseval_argmax = np.argmax(maseval_choices, axis=1)
         reference_argmax = np.argmax(reference_choices, axis=1)
+        argmax_match_rate = (maseval_argmax == reference_argmax).mean()
+        print(f"Argmax match rate: {argmax_match_rate:.2%}")
 
-        # Count matches
-        matches = (maseval_argmax == reference_argmax).sum()
-        total = len(maseval_argmax)
-        match_rate = matches / total
-
-        print(f"Answer match rate: {matches}/{total} ({match_rate:.2%})")
-        print(f"MASEval argmax distribution: {np.bincount(maseval_argmax, minlength=4)}")
-        print(f"Reference argmax distribution: {np.bincount(reference_argmax, minlength=4)}")
-
-        # With contextual token ID computation, MASEval should produce identical
-        # predictions to lm-evaluation-harness (both use log-likelihood scoring)
-        assert match_rate == 1.0, f"Answer match rate {match_rate:.2%} is not 100%. Check that contextual token IDs are being used correctly."
+        assert is_close, (
+            f"Predictions not close enough. Max diff: {max_diff:.6f}, Mean diff: {mean_diff:.6f}. "
+            f"Check model dtype, tokenization, and log-softmax computation match lm-eval."
+        )
 
     def test_disco_prediction_produces_valid_accuracy(self, maseval_predictions, reference_predictions):
         """DISCO prediction from MASEval predictions should produce valid accuracy.
