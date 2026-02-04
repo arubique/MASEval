@@ -27,7 +27,20 @@ $\tau^2$-bench is a benchmark for evaluating agentic systems in realistic, multi
 
 ---
 
-## 3. Gaia2 (ARE)
+## 3. MultiAgentBench (MARBLE)
+
+MultiAgentBench is a comprehensive benchmark suite for evaluating multi-agent collaboration and competition in LLM-based systems. It includes diverse scenarios across multiple domains including research collaboration, negotiation, coding tasks, and more.
+
+### Source and License
+
+- **Original Repository:** [https://github.com/ulab-uiuc/MARBLE](https://github.com/ulab-uiuc/MARBLE)
+- **Paper:** [MultiAgentBench: Evaluating the Collaboration and Competition of LLM agents](https://arxiv.org/abs/2503.01935)
+- **Code License:** MIT
+- **Data License:** MIT
+
+---
+
+## 4. GAIA2
 
 Gaia2 is a benchmark for evaluating LLM-based agents on dynamic, multi-step scenarios using Meta's ARE (Agent Research Environments) platform. It tests agents across 7 capability dimensions: execution, search, adaptability, time, ambiguity, agent2agent, and noise.
 
