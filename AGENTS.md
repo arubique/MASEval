@@ -463,6 +463,10 @@ Returns:
 
 **Use backticks for code references** - method names, parameters, and values: `` `is_done()` ``, `` `stop_tokens` ``, `` `None` ``
 
+## Seeding for Reproducibility
+
+MASEval provides a seeding system for reproducible benchmark runs. Seeds cascade from a global seed through all components, ensuring deterministic behavior when model providers support seeding. Study code and documentation of `Benchmark, DefaultSeedGenerator` to gain an understanding.
+
 ## Early-Release Status
 
 **This project is early-release. Clean, maintainable code is the priority - not backwards compatibility.**

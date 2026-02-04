@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+**Seeding System**
+
+- Added `SeedGenerator` abstract base class and `DefaultSeedGenerator` implementation for reproducible benchmark runs via SHA-256-based seed derivation (PR: #24)
+- Added `seed` and `seed_generator` parameters to `Benchmark.__init__` for enabling reproducibility (PR: #24)
+- Added `seed_generator` parameter to all benchmark setup methods (`setup_environment`, `setup_user`, `setup_agents`, `setup_evaluators`) (PR: #24)
+- Added `seed` parameter to `ModelAdapter.__init__` for deterministic model inference (PR: #24)
+- Added `SeedingError` exception for providers that don't support seeding (Anthropic models raise this if seed is provided) (PR: #24)
+- Added seed support to interface adapters: `OpenAIModelAdapter`, `GoogleGenAIModelAdapter`, `LiteLLMModelAdapter`, `HuggingFaceModelAdapter` pass seeds to underlying APIs (PR: #24)
+
 **Interface**
 
 - CAMEL-AI integration: `CamelAgentAdapter` and `CamelLLMUser` for evaluating CAMEL-AI ChatAgent-based systems (PR: #22)
@@ -18,9 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+**User**
+
+- Refactored `User` class into abstract base class defining the interface (`get_initial_query()`, `respond()`, `is_done()`) with `LLMUser` as the concrete LLM-driven implementation. This enables non-LLM user implementations (scripted, human-in-the-loop, agent-based). (PR: #22)
+- Renamed `AgenticUser` → `AgenticLLMUser` for consistency with the new hierarchy (PR: #22)
+
 **Interface**
 
-- Renamed framework-specific `LLMUser` subclasses for clarity (PR: #22):
+- Renamed framework-specific user classes to reflect the new `LLMUser` base (PR: #22):
   - `SmolAgentUser` → `SmolAgentLLMUser`
   - `LangGraphUser` → `LangGraphLLMUser`
   - `LlamaIndexUser` → `LlamaIndexLLMUser`

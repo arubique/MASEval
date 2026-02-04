@@ -12,6 +12,7 @@ from maseval import (
     TaskQueue,
     Evaluator,
     MessageHistory,
+    SeedGenerator,
 )
 from maseval.core.model import ModelAdapter, ChatResponse
 
@@ -36,6 +37,7 @@ class DummyModelAdapter(ModelAdapter):
         tool_calls: Optional[List[Optional[List[Dict[str, Any]]]]] = None,
         usage: Optional[Dict[str, int]] = None,
         stop_reason: Optional[str] = None,
+        seed: Optional[int] = None,
     ):
         """Initialize DummyModelAdapter.
 
@@ -49,8 +51,9 @@ class DummyModelAdapter(ModelAdapter):
             usage: Optional usage dict to include in all responses. Should have
                 input_tokens, output_tokens, total_tokens.
             stop_reason: Optional stop_reason to include in all responses.
+            seed: Seed for deterministic generation.
         """
-        super().__init__()
+        super().__init__(seed=seed)
         self._model_id = model_id
         self._responses: List[Optional[str]] = responses or ["test response"]
         self._tool_calls = tool_calls
@@ -448,16 +451,27 @@ class DummyBenchmark(Benchmark):
         """Create a dummy model adapter for testing."""
         return DummyModelAdapter(model_id=model_id)
 
-    def setup_environment(self, agent_data: Dict[str, Any], task: Task) -> Environment:
+    def setup_environment(self, agent_data: Dict[str, Any], task: Task, seed_generator: Optional[SeedGenerator] = None) -> Environment:
         self.setup_environment_calls.append((agent_data, task))
         return DummyEnvironment(task.environment_data)
 
-    def setup_user(self, agent_data: Dict[str, Any], environment: Environment, task: Task) -> Optional[User]:
+    def setup_user(
+        self,
+        agent_data: Dict[str, Any],
+        environment: Environment,
+        task: Task,
+        seed_generator: Optional[SeedGenerator] = None,
+    ) -> Optional[User]:
         self.setup_user_calls.append((agent_data, environment, task))
         return None
 
     def setup_agents(
-        self, agent_data: Dict[str, Any], environment: Environment, task: Task, user: Optional[User]
+        self,
+        agent_data: Dict[str, Any],
+        environment: Environment,
+        task: Task,
+        user: Optional[User],
+        seed_generator: Optional[SeedGenerator] = None,
     ) -> Tuple[Sequence[AgentAdapter], Dict[str, AgentAdapter]]:
         self.setup_agents_calls.append((agent_data, environment, task, user))
         agent = DummyAgent()
@@ -465,7 +479,12 @@ class DummyBenchmark(Benchmark):
         return [agent_adapter], {"test_agent": agent_adapter}
 
     def setup_evaluators(
-        self, environment: Environment, task: Task, agents: Sequence[AgentAdapter], user: Optional[User]
+        self,
+        environment: Environment,
+        task: Task,
+        agents: Sequence[AgentAdapter],
+        user: Optional[User],
+        seed_generator: Optional[SeedGenerator] = None,
     ) -> Sequence[Evaluator]:
         self.setup_evaluators_calls.append((environment, task, agents, user))
         return [DummyEvaluator(task, environment, user)]
