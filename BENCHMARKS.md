@@ -33,7 +33,7 @@ Gaia2 is a benchmark for evaluating LLM-based agents on dynamic, multi-step scen
 
 ### Source and License
 
-- **Original Repository:** [https://github.com/facebookresearch/agent-research-environments](https://github.com/facebookresearch/agent-research-environments)
+- **Original Repository:** [https://github.com/facebookresearch/meta-agents-research-environments](https://github.com/facebookresearch/meta-agents-research-environments)
 - **Dataset:** [https://huggingface.co/datasets/meta-agents-research-environments/gaia2](https://huggingface.co/datasets/meta-agents-research-environments/gaia2)
 - **Code License:** MIT
 - **Data License:** Subject to Meta's data usage terms (see HuggingFace dataset page)
