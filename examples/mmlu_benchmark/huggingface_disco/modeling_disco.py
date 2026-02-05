@@ -196,7 +196,6 @@ class DiscoPredictor:
 
     def save_pretrained(self, save_directory: Union[str, Path]) -> None:
         """Save DISCO weights and config to a directory (e.g. for uploading to Hub)."""
-        from transformers import AutoConfig
 
         path = Path(save_directory)
         path.mkdir(parents=True, exist_ok=True)
