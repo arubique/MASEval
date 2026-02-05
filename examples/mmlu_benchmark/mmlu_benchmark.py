@@ -420,6 +420,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         from lm_eval.api.instance import Instance
 
         # Create HFLM model (this handles model loading internally)
+        print(f"Loading HFLM model for {self._model_id}")
         lm = HFLM(
             pretrained=self._model_id,
             trust_remote_code=self._trust_remote_code,
@@ -746,10 +747,101 @@ def save_predictions_for_disco(
     return predictions
 
 
+def _pca_transform_numpy(X: np.ndarray, components: np.ndarray, mean: np.ndarray) -> np.ndarray:
+    """Apply PCA transform using only numpy: (X - mean) @ components.T."""
+    return (X - mean) @ components.T
+
+
+def _predict_tree_numpy(
+    X: np.ndarray,
+    children_left: np.ndarray,
+    children_right: np.ndarray,
+    feature: np.ndarray,
+    threshold: np.ndarray,
+    value: np.ndarray,
+) -> np.ndarray:
+    """Predict for one tree; X shape (n_samples, n_features). Returns (n_samples,)."""
+    out = np.empty(X.shape[0], dtype=np.float64)
+    for i in range(X.shape[0]):
+        node = 0
+        while children_left[node] != -1:
+            if X[i, feature[node]] <= threshold[node]:
+                node = children_left[node]
+            else:
+                node = children_right[node]
+        out[i] = value[node]
+    return out
+
+
+def _predict_rf_numpy(
+    X: np.ndarray,
+    tree_node_counts: np.ndarray,
+    children_left: np.ndarray,
+    children_right: np.ndarray,
+    feature: np.ndarray,
+    threshold: np.ndarray,
+    value: np.ndarray,
+) -> np.ndarray:
+    """Predict using extracted RF tree arrays; X shape (n_samples, n_features). Returns (n_samples,)."""
+    offsets = np.concatenate([[0], np.cumsum(tree_node_counts)])
+    n_trees = len(tree_node_counts)
+    preds = np.zeros((n_trees, X.shape[0]), dtype=np.float64)
+    for t in range(n_trees):
+        lo, hi = offsets[t], offsets[t + 1]
+        preds[t] = _predict_tree_numpy(
+            X,
+            children_left[lo:hi],
+            children_right[lo:hi],
+            feature[lo:hi],
+            threshold[lo:hi],
+            value[lo:hi],
+        )
+    return np.mean(preds, axis=0)
+
+
+def load_disco_from_npz(
+    model_npz_path: str,
+    transform_npz_path: str,
+    meta_path: Optional[str] = None,
+) -> tuple:
+    """Load DISCO transform and model from .npz (no pickle).
+
+    Returns:
+        (transform_fn, predict_fn, meta_dict). transform_fn(X) returns transformed
+        array; predict_fn(X) returns predicted accuracies; meta_dict has
+        sampling_name, number_item, fitted_model_type.
+    """
+    transform_data = np.load(transform_npz_path)
+    components = np.asarray(transform_data["components_"])
+    mean = np.asarray(transform_data["mean_"])
+
+    def transform_fn(X: np.ndarray) -> np.ndarray:
+        return _pca_transform_numpy(X, components, mean)
+
+    model_data = np.load(model_npz_path)
+    tree_node_counts = np.asarray(model_data["tree_node_counts"], dtype=np.int64)
+    children_left = np.asarray(model_data["children_left"], dtype=np.int32)
+    children_right = np.asarray(model_data["children_right"], dtype=np.int32)
+    feature = np.asarray(model_data["feature"], dtype=np.int32)
+    threshold = np.asarray(model_data["threshold"], dtype=np.float64)
+    value = np.asarray(model_data["value"], dtype=np.float64)
+
+    def predict_fn(X: np.ndarray) -> np.ndarray:
+        return _predict_rf_numpy(X, tree_node_counts, children_left, children_right, feature, threshold, value)
+
+    if meta_path is None:
+        meta_path = str(Path(model_npz_path).parent / "disco_meta.json")
+    with open(meta_path) as f:
+        meta = json.load(f)
+    transform_npz = {"components_": components, "mean_": mean}
+    return transform_fn, predict_fn, meta, transform_npz
+
+
 def compute_disco_embedding(
     predictions: np.ndarray,
     pca: int,
     transform=None,
+    transform_npz: Optional[dict] = None,
     apply_softmax: bool = True,
 ) -> tuple:
     """Compute DISCO embeddings from predictions.
@@ -759,7 +851,8 @@ def compute_disco_embedding(
     Args:
         predictions: Predictions tensor of shape (n_models, n_anchor_points, n_classes).
         pca: PCA dimension for dimensionality reduction.
-        transform: Pre-fitted PCA transform. If None, a new one will be fitted.
+        transform: Pre-fitted sklearn PCA transform. If None, a new one will be fitted (unless transform_npz).
+        transform_npz: If set, (components_, mean_) from npz; used instead of transform (no pickle).
         apply_softmax: Whether to apply softmax to predictions.
 
     Returns:
@@ -782,19 +875,26 @@ def compute_disco_embedding(
 
     # Flatten to (n_models, n_anchor_points * n_classes)
     emb_unreduced = emb_unreduced.reshape(emb_unreduced.shape[0], -1)
+    X = emb_unreduced.numpy()
 
     # Apply PCA
     if pca is not None:
-        if transform is None:
+        if transform_npz is not None:
+            emb = _pca_transform_numpy(X, transform_npz["components_"], transform_npz["mean_"])
+            emb = torch.Tensor(emb)
+            transform = None
+        elif transform is not None:
+            emb = transform.transform(X)
+            emb = torch.Tensor(emb)
+        else:
             # Fit new PCA transform
             transform = PCA(
                 n_components=pca,
                 svd_solver="full",
                 random_state=42,
-            ).fit(emb_unreduced.numpy())
-
-        emb = transform.transform(emb_unreduced.numpy())
-        emb = torch.Tensor(emb)
+            ).fit(X)
+            emb = transform.transform(X)
+            emb = torch.Tensor(emb)
     else:
         emb = emb_unreduced
 
@@ -811,23 +911,53 @@ def predict_with_disco(
 
     This implements the prediction logic from disco-public/scripts/predict_model_performance.py.
 
+    Use .npz paths (from extract_disco_weights.py) to avoid pickle/sklearn version warnings.
+
     Args:
         predictions: Predictions tensor of shape (n_models, n_anchor_points, n_classes).
-        model_path: Path to fitted weights pickle file.
-        transform_path: Path to PCA transform pickle file (optional, can be in model_path).
+        model_path: Path to fitted weights pickle file or disco_model.npz.
+        transform_path: Path to PCA transform pickle or disco_transform.npz (optional if in model_path).
         pca: PCA dimension (default: 256).
 
     Returns:
         Dict with predicted accuracies and metadata.
     """
-    # Load model data
+    use_npz = model_path.endswith(".npz") and (transform_path or "").endswith(".npz")
+    if model_path.endswith(".npz") and not (transform_path or "").endswith(".npz"):
+        raise ValueError("When using .npz model path, provide --disco_transform_path to disco_transform.npz")
+
+    if use_npz:
+        transform_fn, predict_fn, meta, transform_npz = load_disco_from_npz(model_path, transform_path, meta_path=None)
+        sampling_name = meta["sampling_name"]
+        number_item = meta["number_item"]
+        fitted_model_type = meta["fitted_model_type"]
+        print(f"  Using: sampling={sampling_name}, n_items={number_item}, model={fitted_model_type} (from .npz)")
+
+        embeddings, _ = compute_disco_embedding(
+            predictions,
+            pca=pca,
+            transform=None,
+            transform_npz=transform_npz,
+            apply_softmax=True,
+        )
+        X_emb = embeddings.numpy() if hasattr(embeddings, "numpy") else np.asarray(embeddings)
+        pred_values = predict_fn(X_emb)
+        predicted_accs = {i: float(pred_values[i]) for i in range(len(pred_values))}
+        return {
+            "predicted_accuracies": predicted_accs,
+            "sampling_name": sampling_name,
+            "number_item": number_item,
+            "fitted_model_type": fitted_model_type,
+            "pca": pca,
+        }
+
+    # Pickle path
     with open(model_path, "rb") as f:
         model_data = pickle.load(f)
 
     if not isinstance(model_data, dict):
         raise ValueError(f"model_path must contain a dict. Got {type(model_data)}")
 
-    # Get transform
     if transform_path is not None:
         with open(transform_path, "rb") as f:
             transform = pickle.load(f)
@@ -836,34 +966,19 @@ def predict_with_disco(
     else:
         raise ValueError("Transform not found. Provide --disco_transform_path or ensure the model file contains a 'transform' key.")
 
-    # Get fitted weights
     if "fitted_weights" in model_data:
         fitted_weights = model_data["fitted_weights"]
     else:
-        # Assume the dict itself is fitted_weights (excluding transform)
         fitted_weights = {k: v for k, v in model_data.items() if k != "transform"}
         if not fitted_weights:
             raise ValueError("Could not find fitted_weights in model file.")
 
-    # Get metadata or infer from structure
-    if "sampling_name" in model_data:
-        sampling_name = model_data["sampling_name"]
-    else:
-        sampling_name = list(fitted_weights.keys())[0]
-
-    if "number_item" in model_data:
-        number_item = model_data["number_item"]
-    else:
-        number_item = list(fitted_weights[sampling_name].keys())[0]
-
-    if "fitted_model_type" in model_data:
-        fitted_model_type = model_data["fitted_model_type"]
-    else:
-        fitted_model_type = list(fitted_weights[sampling_name][number_item].keys())[0]
+    sampling_name = model_data.get("sampling_name") or list(fitted_weights.keys())[0]
+    number_item = model_data.get("number_item") or list(fitted_weights[sampling_name].keys())[0]
+    fitted_model_type = model_data.get("fitted_model_type") or list(fitted_weights[sampling_name][number_item].keys())[0]
 
     print(f"  Using: sampling={sampling_name}, n_items={number_item}, model={fitted_model_type}")
 
-    # Compute embeddings
     embeddings, _ = compute_disco_embedding(
         predictions,
         pca=pca,
@@ -871,21 +986,11 @@ def predict_with_disco(
         apply_softmax=True,
     )
 
-    # Get the fitted model
     fitted_model = fitted_weights[sampling_name][number_item][fitted_model_type]
-
-    # Predict accuracies for each model
     predicted_accs = {}
     for model_idx in range(embeddings.shape[0]):
         model_embedding = embeddings[model_idx]
-
-        # Convert to numpy if needed
-        if hasattr(model_embedding, "numpy"):
-            model_embedding_np = model_embedding.numpy()
-        else:
-            model_embedding_np = np.array(model_embedding)
-
-        # Predict using fitted model
+        model_embedding_np = model_embedding.numpy() if hasattr(model_embedding, "numpy") else np.array(model_embedding)
         predicted_acc = fitted_model.predict(model_embedding_np.reshape(1, -1))[0]
         predicted_accs[model_idx] = predicted_acc
 
@@ -965,7 +1070,7 @@ def main():
 
     # Optionally precompute logprobs using lm-eval batching for exact match
     if args.use_lmeval_batching:
-        print("\nPrecomputing logprobs using lm-eval batching (for exact numerical match)...")
+        print("\nPrecomputing logprobs using lm-eval batching ...")
         # Get task list for precomputation
         task_list = list(tasks._anchor_tasks if hasattr(tasks, "_anchor_tasks") else tasks._tasks)
         benchmark.precompute_all_logprobs_lmeval(task_list)
@@ -1020,15 +1125,15 @@ def main():
         for model_idx, acc in disco_results["predicted_accuracies"].items():
             print(f"  Model {model_idx}: {acc:.6f}")
 
-        # Compare with actual anchor accuracy
-        print("\n" + "-" * 40)
-        print("Comparison:")
-        print("-" * 40)
-        predicted_acc = disco_results["predicted_accuracies"][0]
-        actual_anchor_acc = metrics["acc"]
-        print(f"  Actual accuracy (on anchor points): {actual_anchor_acc:.6f}")
-        print(f"  DISCO predicted accuracy (full benchmark): {predicted_acc:.6f}")
-        print(f"  Difference: {predicted_acc - actual_anchor_acc:+.6f}")
+        # # Compare with actual anchor accuracy
+        # print("\n" + "-" * 40)
+        # print("Comparison:")
+        # print("-" * 40)
+        # predicted_acc = disco_results["predicted_accuracies"][0]
+        # actual_anchor_acc = metrics["acc"]
+        # print(f"  Actual accuracy (on anchor points): {actual_anchor_acc:.6f}")
+        # print(f"  DISCO predicted accuracy (full benchmark): {predicted_acc:.6f}")
+        # print(f"  Difference: {predicted_acc - actual_anchor_acc:+.6f}")
 
     # Save summary
     summary_data = {
