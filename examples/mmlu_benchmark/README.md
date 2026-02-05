@@ -108,6 +108,24 @@ python mmlu_benchmark.py ... \
 
 No pickle or sklearn objects are loaded at runtime when using `.npz` paths.
 
+#### Loading DISCO from Hugging Face
+
+You can upload the extracted weights as a custom Hugging Face model and load it with `AutoModel.from_pretrained(..., trust_remote_code=True)`. See [huggingface_disco/README.md](huggingface_disco/README.md) for:
+
+1. Extracting weights (`extract_disco_weights.py`)
+2. Building the HF repo (`huggingface_disco/build_repo.py`)
+3. Uploading to the Hub
+
+Then run the benchmark with a repo id instead of local paths:
+
+```bash
+python mmlu_benchmark.py ... \
+    --disco_prediction \
+    --disco_model_path <USERNAME>/my-disco-mmlu
+```
+
+(No `--disco_transform_path` needed; the Hub model contains everything.)
+
 ### Quick Test
 
 Run on a small subset for testing:

@@ -912,16 +912,40 @@ def predict_with_disco(
     This implements the prediction logic from disco-public/scripts/predict_model_performance.py.
 
     Use .npz paths (from extract_disco_weights.py) to avoid pickle/sklearn version warnings.
+    Use a Hugging Face repo id (e.g. "<USERNAME>/my-disco-mmlu") to load via AutoModel.from_pretrained(..., trust_remote_code=True).
 
     Args:
         predictions: Predictions tensor of shape (n_models, n_anchor_points, n_classes).
-        model_path: Path to fitted weights pickle file or disco_model.npz.
-        transform_path: Path to PCA transform pickle or disco_transform.npz (optional if in model_path).
+        model_path: Path to fitted weights pickle, disco_model.npz, or HF repo id (USERNAME/repo).
+        transform_path: Path to PCA transform pickle or disco_transform.npz (optional if npz or HF).
         pca: PCA dimension (default: 256).
 
     Returns:
         Dict with predicted accuracies and metadata.
     """
+    # Hugging Face repo: model_path like "username/repo-name", no local path
+    use_hf = "/" in model_path and not Path(model_path).exists() and (transform_path is None or transform_path == model_path)
+    if use_hf:
+        from transformers import AutoModel
+
+        disco_model = AutoModel.from_pretrained(model_path, trust_remote_code=True)
+        pred_values = disco_model.predict(np.asarray(predictions), apply_softmax=True)
+        predicted_accs = {i: float(pred_values[i]) for i in range(len(pred_values))}
+        config = getattr(disco_model, "config", None)
+        meta = {
+            "sampling_name": getattr(config, "sampling_name", "") if config else "",
+            "number_item": getattr(config, "number_item", "") if config else "",
+            "fitted_model_type": getattr(config, "fitted_model_type", "") if config else "",
+        }
+        print(f"  Using: DISCO predictor from Hugging Face ({model_path})")
+        return {
+            "predicted_accuracies": predicted_accs,
+            "sampling_name": meta["sampling_name"],
+            "number_item": meta["number_item"],
+            "fitted_model_type": meta["fitted_model_type"],
+            "pca": pca,
+        }
+
     use_npz = model_path.endswith(".npz") and (transform_path or "").endswith(".npz")
     if model_path.endswith(".npz") and not (transform_path or "").endswith(".npz"):
         raise ValueError("When using .npz model path, provide --disco_transform_path to disco_transform.npz")

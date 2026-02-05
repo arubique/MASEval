@@ -2,6 +2,8 @@
 .idea/
 .DS_Store
 .devcontainer/
+results/
+DISCO-MMLU/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
