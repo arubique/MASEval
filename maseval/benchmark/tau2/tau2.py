@@ -247,6 +247,8 @@ class Tau2Benchmark(Benchmark):
         fail_on_task_error: bool = False,
         fail_on_evaluation_error: bool = False,
         progress_bar: bool | str = True,
+        seed: Optional[int] = None,
+        seed_generator=None,
     ):
         """Initialize benchmark with tau2-specific defaults.
 
@@ -261,6 +263,8 @@ class Tau2Benchmark(Benchmark):
             fail_on_evaluation_error: If True, raise on evaluation errors. Default False.
             progress_bar: Progress display. True (default) for tqdm, "rich" for Rich,
                 or False to disable.
+            seed: Global seed for reproducible benchmark runs.
+            seed_generator: Custom seed generator (takes precedence over seed).
         """
         super().__init__(
             callbacks=callbacks,
@@ -271,6 +275,8 @@ class Tau2Benchmark(Benchmark):
             fail_on_task_error=fail_on_task_error,
             fail_on_evaluation_error=fail_on_evaluation_error,
             progress_bar=progress_bar,
+            seed=seed,
+            seed_generator=seed_generator,
         )
 
     def _get_user_model_id(self, task: Task) -> str:
