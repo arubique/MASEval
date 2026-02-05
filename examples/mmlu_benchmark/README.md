@@ -84,6 +84,30 @@ This is equivalent to running:
 1. The evaluation on anchor points (like `scripts/run_lm_eval.py --skip_non_anchor_points`)
 2. The prediction step (like `scripts/predict_model_performance.py`)
 
+#### Avoiding pickle / sklearn version warnings
+
+If you see `InconsistentVersionWarning` when loading the DISCO pickles (e.g. fitted_weights.pkl was saved with sklearn 1.7.2 but you use 1.8.0), you can export the model to NumPy-only `.npz` files and use those instead:
+
+```bash
+# One-time extraction (run with the env that created the pickles, or ignore the warning)
+python extract_disco_weights.py \
+    --model_path /path/to/fitted_weights.pkl \
+    --transform_path /path/to/transform.pkl \
+    --output_dir /path/to/disco_npz
+```
+
+Then point the benchmark at the extracted files:
+
+```bash
+python mmlu_benchmark.py ... \
+    --disco_prediction \
+    --disco_model_path /path/to/disco_npz/disco_model.npz \
+    --disco_transform_path /path/to/disco_npz/disco_transform.npz \
+    --pca 256
+```
+
+No pickle or sklearn objects are loaded at runtime when using `.npz` paths.
+
 ### Quick Test
 
 Run on a small subset for testing:
