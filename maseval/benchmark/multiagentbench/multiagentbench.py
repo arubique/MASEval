@@ -450,7 +450,7 @@ class MarbleMultiAgentBenchBenchmark(MultiAgentBenchBenchmark):
             MARBLE environment instance
         """
         try:
-            from .marble.environments.base_env import BaseEnvironment  # type: ignore[unresolved-import]
+            from .marble.marble.environments.base_env import BaseEnvironment  # type: ignore[unresolved-import]
         except ImportError as e:
             raise ImportError(MARBLE_IMPORT_ERROR.format(error=e)) from e
 
@@ -479,7 +479,7 @@ class MarbleMultiAgentBenchBenchmark(MultiAgentBenchBenchmark):
             marble_env: MARBLE environment
         """
         try:
-            from .marble.graph.agent_graph import AgentGraph  # type: ignore[unresolved-import]
+            from .marble.marble.graph.agent_graph import AgentGraph  # type: ignore[unresolved-import]
         except ImportError:
             # MARBLE not available, skip graph setup
             return

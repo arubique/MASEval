@@ -133,7 +133,7 @@ class MultiAgentBenchEnvironment(Environment):
 
         # Import MARBLE environments
         try:
-            from .marble.environments.base_env import BaseEnvironment  # type: ignore[unresolved-import]
+            from .marble.marble.environments.base_env import BaseEnvironment  # type: ignore[unresolved-import]
         except ImportError as e:
             raise ImportError(MARBLE_IMPORT_ERROR.format(error=e)) from e
 
@@ -158,7 +158,7 @@ class MultiAgentBenchEnvironment(Environment):
             # Dynamic import of domain-specific environment
             module_path, class_name = env_class_path.rsplit(".", 1)
             # Adjust import path for vendored MARBLE
-            module_path = module_path.replace("marble.", ".marble.", 1)
+            module_path = module_path.replace("marble.", ".marble.marble.", 1)
             module = __import__(module_path, globals(), locals(), [class_name], 1)
             env_class = getattr(module, class_name)
             return env_class(env_name, config)

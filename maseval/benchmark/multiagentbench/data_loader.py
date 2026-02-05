@@ -111,6 +111,13 @@ def download_marble(
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Failed to checkout commit {checkout_commit}: {e.stderr}") from e
 
+    # Create __init__.py at clone root so Python can traverse it as a package.
+    # The actual MARBLE Python package lives at marble/marble/ inside the clone,
+    # but we need the clone root to be importable for relative imports to work.
+    init_file = target_dir / "__init__.py"
+    if target_dir.exists() and not init_file.exists():
+        init_file.write_text("")
+
     logger.info(f"MARBLE successfully installed at {target_dir}")
     return target_dir
 

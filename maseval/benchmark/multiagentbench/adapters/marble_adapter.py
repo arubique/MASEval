@@ -198,7 +198,7 @@ def create_marble_agents(
         ImportError: If MARBLE is not available
     """
     try:
-        from ..marble.agent.base_agent import BaseAgent  # type: ignore[unresolved-import]
+        from ..marble.marble.agent.base_agent import BaseAgent  # type: ignore[unresolved-import]
     except ImportError as e:
         raise ImportError(MARBLE_IMPORT_ERROR.format(error=e)) from e
 
