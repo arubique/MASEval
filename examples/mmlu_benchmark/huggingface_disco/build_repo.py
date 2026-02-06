@@ -6,13 +6,34 @@ Usage:
         --weights_dir /path/to/disco_weights \\
         --output_dir ./my-disco-mmlu
 
+    # Include anchor points so users can omit --anchor_points_path when using the HF model
+    python build_repo.py \\
+        --weights_dir /path/to/disco_weights \\
+        --output_dir ./my-disco-mmlu \\
+        --anchor_points_path /path/to/anchor_points_disagreement.pkl
+
 Then upload with: huggingface-cli upload <USERNAME>/my-disco-mmlu ./my-disco-mmlu .
 """
 
 import argparse
 import json
+import pickle
 import shutil
 from pathlib import Path
+
+
+def _load_anchor_points(path: Path) -> list:
+    """Load anchor points from .pkl or .json; return a list."""
+    path = Path(path)
+    if path.suffix.lower() == ".json":
+        with open(path) as f:
+            out = json.load(f)
+    else:
+        with open(path, "rb") as f:
+            out = pickle.load(f)
+    if hasattr(out, "tolist"):
+        out = out.tolist()
+    return list(out)
 
 
 def main():
@@ -30,6 +51,12 @@ def main():
         type=str,
         required=True,
         help="Output directory to create (will contain config, code, and weights).",
+    )
+    parser.add_argument(
+        "--anchor_points_path",
+        type=str,
+        default=None,
+        help="Path to anchor points .pkl or .json; saved as anchor_points.json in the repo.",
     )
     args = parser.parse_args()
 
@@ -73,6 +100,17 @@ def main():
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
     print(f"Wrote {config_path}")
+
+    # Optional: anchor points so users can omit --anchor_points_path when loading from HF
+    if args.anchor_points_path:
+        ap_path = Path(args.anchor_points_path)
+        if not ap_path.exists():
+            raise FileNotFoundError(f"Anchor points file not found: {ap_path}")
+        anchor_points = _load_anchor_points(ap_path)
+        ap_out = output_dir / "anchor_points.json"
+        with open(ap_out, "w") as f:
+            json.dump(anchor_points, f, indent=2)
+        print(f"Wrote {ap_out} ({len(anchor_points)} anchor points)")
 
     print(f"\nRepo ready at: {output_dir.resolve()}")
     print("Upload with: huggingface-cli upload <USERNAME>/my-disco-mmlu ./my-disco-mmlu .")

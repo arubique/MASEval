@@ -1027,6 +1027,26 @@ def predict_with_disco(
     }
 
 
+def _resolve_anchor_points_path(
+    disco_model_path: str,
+    anchor_points_path: Optional[str],
+) -> Optional[str]:
+    """If anchor_points_path is None and model_path is an HF repo with anchor_points.json, return its path."""
+    if anchor_points_path is not None:
+        return anchor_points_path
+    if "/" not in disco_model_path or Path(disco_model_path).exists():
+        return None
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        return None
+    repo_path = Path(snapshot_download(disco_model_path))
+    ap_file = repo_path / "anchor_points.json"
+    if ap_file.exists():
+        return str(ap_file)
+    return None
+
+
 def main():
     """Main entry point."""
     args = parse_args()
@@ -1035,8 +1055,14 @@ def main():
     if args.disco_prediction:
         if args.disco_model_path is None:
             raise ValueError("--disco_model_path is required when --disco_prediction is enabled")
-        if args.anchor_points_path is None:
-            raise ValueError("--anchor_points_path is required when --disco_prediction is enabled")
+        anchor_points_path_resolved = _resolve_anchor_points_path(args.disco_model_path, args.anchor_points_path)
+        if anchor_points_path_resolved is None and args.anchor_points_path is None:
+            raise ValueError(
+                "Anchor points required for DISCO prediction. Provide --anchor_points_path or use a "
+                "DISCO model repo that includes anchor_points.json (build with build_repo.py --anchor_points_path)."
+            )
+        if args.anchor_points_path is None and anchor_points_path_resolved:
+            args.anchor_points_path = anchor_points_path_resolved
         if args.pca is not None and args.disco_transform_path is None:
             print("Warning: --pca specified without --disco_transform_path. Transform will be loaded from model file if available.")
 
