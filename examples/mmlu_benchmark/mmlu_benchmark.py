@@ -24,13 +24,12 @@ Usage:
         --anchor_points_path /path/to/anchor_points_disagreement.pkl \\
         --use_full_prompt
 
-    # Run with DISCO prediction (predict full benchmark performance from anchor points)
+    # Run with DISCO prediction (passing --disco_model_path enables it)
     python mmlu_benchmark.py \\
         --model_id "alignment-handbook/zephyr-7b-sft-full" \\
         --data_path /path/to/mmlu_prompts_examples.json \\
         --anchor_points_path /path/to/anchor_points_disagreement.pkl \\
         --use_full_prompt \\
-        --disco_prediction \\
         --disco_model_path /path/to/fitted_weights.pkl \\
         --disco_transform_path /path/to/transform.pkl \\
         --pca 256
@@ -136,23 +135,18 @@ def parse_args():
         help="Number of parallel workers for task execution",
     )
 
-    # DISCO prediction arguments
-    parser.add_argument(
-        "--disco_prediction",
-        action="store_true",
-        help="Enable DISCO prediction of full benchmark performance from anchor points",
-    )
+    # DISCO prediction: enabled when --disco_model_path is set
     parser.add_argument(
         "--disco_model_path",
         type=str,
         default=None,
-        help="Path to DISCO fitted weights pickle file (required if --disco_prediction)",
+        help="If set, run DISCO prediction (path to fitted weights .pkl, .npz, or Hugging Face repo id)",
     )
     parser.add_argument(
         "--disco_transform_path",
         type=str,
         default=None,
-        help="Path to DISCO PCA transform pickle file (required if --disco_prediction with --pca)",
+        help="Path to DISCO PCA transform .pkl or .npz (required for local .pkl model when using --pca)",
     )
     parser.add_argument(
         "--pca",
@@ -1081,9 +1075,7 @@ def main():
     args = parse_args()
 
     # Validate DISCO prediction arguments and resolve HF repo (anchor points + eval_config)
-    if args.disco_prediction:
-        if args.disco_model_path is None:
-            raise ValueError("--disco_model_path is required when --disco_prediction is enabled")
+    if args.disco_model_path is not None:
         anchor_points_path_resolved, hf_repo_path = _resolve_hf_disco_repo(args.disco_model_path, args.anchor_points_path)
         if anchor_points_path_resolved is None and args.anchor_points_path is None:
             raise ValueError(
@@ -1114,7 +1106,7 @@ def main():
     print(f"Use full prompt: {args.use_full_prompt}")
     print(f"Device: {args.device}")
     print(f"Output dir: {args.output_dir}")
-    if args.disco_prediction:
+    if args.disco_model_path is not None:
         print("DISCO prediction: ENABLED")
         print(f"  Model path: {args.disco_model_path}")
         print(f"  Transform path: {args.disco_transform_path or '(from model file)'}")
@@ -1185,7 +1177,7 @@ def main():
 
     # Build predictions tensor for DISCO
     predictions = None
-    if args.predictions_path or args.disco_prediction:
+    if args.predictions_path or args.disco_model_path is not None:
         predictions = save_predictions_for_disco(
             results=results,
             output_path=args.predictions_path if args.predictions_path else None,
@@ -1195,7 +1187,7 @@ def main():
 
     # Run DISCO prediction if enabled
     disco_results = None
-    if args.disco_prediction:
+    if args.disco_model_path is not None:
         print("\n" + "=" * 80)
         print("DISCO Prediction")
         print("=" * 80)

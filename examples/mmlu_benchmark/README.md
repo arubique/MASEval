@@ -74,7 +74,6 @@ python mmlu_benchmark.py \
     --data_path /path/to/mmlu_prompts_examples.json \
     --anchor_points_path /path/to/anchor_points_disagreement.pkl \
     --use_full_prompt \
-    --disco_prediction \
     --disco_model_path /path/to/fitted_weights.pkl \
     --disco_transform_path /path/to/transform.pkl \
     --pca 256
@@ -100,7 +99,6 @@ Then point the benchmark at the extracted files:
 
 ```bash
 python mmlu_benchmark.py ... \
-    --disco_prediction \
     --disco_model_path /path/to/disco_npz/disco_model.npz \
     --disco_transform_path /path/to/disco_npz/disco_transform.npz \
     --pca 256
@@ -120,7 +118,6 @@ Then run the benchmark with a repo id instead of local paths:
 
 ```bash
 python mmlu_benchmark.py ... \
-    --disco_prediction \
     --disco_model_path <USERNAME>/my-disco-mmlu
 ```
 
@@ -151,8 +148,7 @@ python mmlu_benchmark.py \
 | `--device` | Device to run model on | `cuda:0` |
 | `--trust_remote_code` | Trust remote code when loading model | False |
 | `--num_workers` | Number of parallel workers | 1 |
-| `--disco_prediction` | Enable DISCO prediction from anchor points | False |
-| `--disco_model_path` | Path to DISCO fitted weights pickle | None |
+| `--disco_model_path` | If set, run DISCO prediction (.pkl, .npz, or HF repo id) | None |
 | `--disco_transform_path` | Path to DISCO PCA transform pickle | None |
 | `--pca` | PCA dimension for DISCO embeddings | 256 |
 
