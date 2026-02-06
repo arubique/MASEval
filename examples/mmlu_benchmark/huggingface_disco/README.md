@@ -32,14 +32,19 @@ python examples/mmlu_benchmark/huggingface_disco/build_repo.py \
   --output_dir ./my-disco-mmlu
 ```
 
-To include anchor points so users can run the benchmark without `--anchor_points_path`:
+To include anchor points and recommended eval settings (so users can omit matching args when running the benchmark):
 
 ```bash
 python examples/mmlu_benchmark/huggingface_disco/build_repo.py \
   --weights_dir /path/to/disco_weights \
   --output_dir ./my-disco-mmlu \
-  --anchor_points_path /path/to/anchor_points_disagreement.pkl
+  --anchor_points_path /path/to/anchor_points_disagreement.pkl \
+  --pca 256 \
+  --pad_to_size 31 \
+  --use_lmeval_batching
 ```
+
+These options are stored in `config.json` as `eval_config`. When the benchmark loads the model from the Hub, it uses these values and raises an error if the user passes a different `--pca`, or passes `--pad_to_size` or `--use_lmeval_batching` (the user must omit these flags so the model's config is used).
 
 This copies the NumPy weights and writes `config.json` with `auto_map` so `AutoModel.from_pretrained(..., trust_remote_code=True)` loads `DiscoPredictor`.
 
@@ -66,7 +71,8 @@ api.upload_folder(folder_path="./my-disco-mmlu", repo_id="<USERNAME>/my-disco-mm
 - `disco_transform.npz` – PCA components and mean
 - `disco_model.npz` – Random Forest tree arrays
 - `disco_meta.json` – sampling_name, number_item, fitted_model_type (optional, for display)
-- `anchor_points.json` – list of anchor doc_ids (optional; add with `--anchor_points_path` so users can omit `--anchor_points_path` when running the benchmark)
+- `anchor_points.json` – list of anchor doc_ids (optional; add with `--anchor_points_path`)
+- `config.json` may include `eval_config` – optional `pca`, `pad_to_size`, `use_lmeval_batching`; when loading from HF the benchmark uses these and errors if the user passes conflicting flags
 
 ## Dependencies
 

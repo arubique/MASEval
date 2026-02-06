@@ -6,11 +6,14 @@ Usage:
         --weights_dir /path/to/disco_weights \\
         --output_dir ./my-disco-mmlu
 
-    # Include anchor points so users can omit --anchor_points_path when using the HF model
+    # Include anchor points and eval config (pca, pad_to_size, use_lmeval_batching)
     python build_repo.py \\
         --weights_dir /path/to/disco_weights \\
         --output_dir ./my-disco-mmlu \\
-        --anchor_points_path /path/to/anchor_points_disagreement.pkl
+        --anchor_points_path /path/to/anchor_points_disagreement.pkl \\
+        --pca 256 --pad_to_size 31 --use_lmeval_batching
+
+Stored eval_config is applied by the benchmark when loading the model from HF if the user did not override those args.
 
 Then upload with: huggingface-cli upload <USERNAME>/my-disco-mmlu ./my-disco-mmlu .
 """
@@ -58,6 +61,23 @@ def main():
         default=None,
         help="Path to anchor points .pkl or .json; saved as anchor_points.json in the repo.",
     )
+    parser.add_argument(
+        "--pca",
+        type=int,
+        default=None,
+        help="PCA dimension used for this model; stored in eval_config so the benchmark can use it when loading from HF.",
+    )
+    parser.add_argument(
+        "--pad_to_size",
+        type=int,
+        default=None,
+        help="Pad predictions to this size; stored in eval_config for the benchmark when loading from HF.",
+    )
+    parser.add_argument(
+        "--use_lmeval_batching",
+        action="store_true",
+        help="Whether lm-eval batching was used; stored in eval_config for the benchmark when loading from HF.",
+    )
     args = parser.parse_args()
 
     weights_dir = Path(args.weights_dir)
@@ -96,6 +116,16 @@ def main():
         "number_item": meta.get("number_item", ""),
         "fitted_model_type": meta.get("fitted_model_type", ""),
     }
+    # Eval config: when the benchmark loads this model from HF, it can apply these if the user did not override
+    eval_config = {}
+    if args.pca is not None:
+        eval_config["pca"] = args.pca
+    if args.pad_to_size is not None:
+        eval_config["pad_to_size"] = args.pad_to_size
+    if args.use_lmeval_batching:
+        eval_config["use_lmeval_batching"] = True
+    if eval_config:
+        config["eval_config"] = eval_config
     config_path = output_dir / "config.json"
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
