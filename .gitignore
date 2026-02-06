@@ -4,6 +4,7 @@
 .devcontainer/
 results/
 DISCO-MMLU/
+flattened-MMLU/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

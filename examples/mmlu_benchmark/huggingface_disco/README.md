@@ -74,6 +74,32 @@ api.upload_folder(folder_path="./my-disco-mmlu", repo_id="<USERNAME>/my-disco-mm
 - `anchor_points.json` – list of anchor doc_ids (optional; add with `--anchor_points_path`)
 - `config.json` may include `eval_config` – optional `pca`, `pad_to_size`, `use_lmeval_batching`; when loading from HF the benchmark uses these and errors if the user passes conflicting flags
 
+## MMLU prompts dataset (build_data_repo.py)
+
+To store the MMLU prompts JSON on the Hub so you can use it as `--data_path` from anywhere:
+
+```bash
+python examples/mmlu_benchmark/huggingface_disco/build_data_repo.py \
+  --data_path /path/to/mmlu_prompts_examples.json \
+  --output_dir ./mmlu-prompts-examples
+```
+
+Upload as a dataset:
+
+```bash
+cd mmlu-prompts-examples
+huggingface-cli upload <USERNAME>/mmlu-prompts-examples . . --repo-type dataset
+```
+
+Then run the benchmark with the repo id as `--data_path` (the script downloads the file automatically):
+
+```bash
+python mmlu_benchmark.py \
+  --model_id ... \
+  --data_path <USERNAME>/mmlu-prompts-examples \
+  ...
+```
+
 ## Dependencies
 
 Loading from the Hub only needs:

@@ -78,7 +78,7 @@ def parse_args():
         "--data_path",
         type=str,
         required=True,
-        help="Path to MMLU prompts JSON file (mmlu_prompts_examples.json format)",
+        help="Path to MMLU prompts JSON file, or Hugging Face dataset repo id (e.g. username/mmlu-prompts-examples)",
     )
 
     # Optional arguments
@@ -1021,6 +1021,25 @@ def predict_with_disco(
     }
 
 
+def _resolve_data_path(data_path: str) -> str:
+    """If data_path looks like an HF dataset repo id (user/repo), download and return local path."""
+    if not data_path or "/" not in data_path or Path(data_path).exists():
+        return data_path
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError:
+        return data_path
+    try:
+        local = hf_hub_download(
+            repo_id=data_path,
+            filename="mmlu_prompts_examples.json",
+            repo_type="dataset",
+        )
+        return local
+    except Exception:
+        return data_path
+
+
 def _apply_eval_config_from_repo(repo_path: Path, args: "argparse.Namespace") -> None:
     """Load eval_config from repo; forbid passing --pca/--pad_to_size/--use_lmeval_batching, then set args from eval_config."""
     config_path = repo_path / "config.json"
@@ -1073,6 +1092,9 @@ def _resolve_hf_disco_repo(
 def main():
     """Main entry point."""
     args = parse_args()
+
+    # Resolve --data_path if it is an HF dataset repo id (e.g. username/mmlu-prompts-examples)
+    args.data_path = _resolve_data_path(args.data_path)
 
     # Validate DISCO prediction arguments and resolve HF repo (anchor points + eval_config)
     if args.disco_model_path is not None:
