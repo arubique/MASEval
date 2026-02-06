@@ -1090,11 +1090,18 @@ def main():
                 "Anchor points required for DISCO prediction. Provide --anchor_points_path or use a "
                 "DISCO model repo that includes anchor_points.json (build with build_repo.py --anchor_points_path)."
             )
+        if hf_repo_path is not None:
+            if args.anchor_points_path is not None:
+                raise ValueError(
+                    "When using a DISCO model from the Hub, do not pass --anchor_points_path; anchor points are taken from the model repo."
+                )
+            if args.disco_transform_path is not None:
+                raise ValueError(
+                    "When using a DISCO model from the Hub, do not pass --disco_transform_path; the transform is included in the model repo."
+                )
+            _apply_eval_config_from_repo(hf_repo_path, args)
         if args.anchor_points_path is None and anchor_points_path_resolved:
             args.anchor_points_path = anchor_points_path_resolved
-        # Apply eval_config from HF repo when user left script defaults (so model's training config is used)
-        if hf_repo_path is not None:
-            _apply_eval_config_from_repo(hf_repo_path, args)
         if args.pca is not None and args.disco_transform_path is None:
             print("Warning: --pca specified without --disco_transform_path. Transform will be loaded from model file if available.")
 
