@@ -570,6 +570,23 @@ def load_pickle(path: Union[str, Path]) -> Any:
         return pickle.load(f)
 
 
+def load_anchor_points(path: Union[str, Path]) -> List[int]:
+    """Load anchor points from a .json or .pkl file. Returns a list of doc_ids."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Anchor points file not found: {path}")
+    if path.suffix.lower() == ".json":
+        with open(path) as f:
+            anchor_points = json.load(f)
+    else:
+        anchor_points = load_pickle(path)
+    if HAS_NUMPY and isinstance(anchor_points, np.ndarray):
+        anchor_points = anchor_points.tolist()
+    elif not HAS_NUMPY and hasattr(anchor_points, "tolist"):
+        anchor_points = anchor_points.tolist()
+    return list(anchor_points)
+
+
 def load_tasks(
     data_path: Union[str, Path],
     anchor_points_path: Optional[Union[str, Path]] = None,
@@ -624,13 +641,7 @@ def load_tasks(
     # Load anchor points if provided
     anchor_points = None
     if anchor_points_path is not None:
-        anchor_points = load_pickle(anchor_points_path)
-        # Convert numpy array to list if necessary
-        if HAS_NUMPY and isinstance(anchor_points, np.ndarray):
-            anchor_points = anchor_points.tolist()
-        elif not HAS_NUMPY and hasattr(anchor_points, "tolist"):
-            # Fallback: try tolist() method if it exists
-            anchor_points = anchor_points.tolist()
+        anchor_points = load_anchor_points(anchor_points_path)
 
     # Create appropriate queue
     if anchor_points is not None:
