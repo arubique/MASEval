@@ -157,7 +157,7 @@ def parse_args():
     parser.add_argument(
         "--pca",
         type=int,
-        default=256,
+        default=None,
         help="PCA dimension for DISCO embeddings (default: 256)",
     )
     parser.add_argument(
@@ -1027,35 +1027,64 @@ def predict_with_disco(
     }
 
 
-def _resolve_anchor_points_path(
+def _apply_eval_config_from_repo(repo_path: Path, args: "argparse.Namespace") -> None:
+    """Load eval_config from repo; forbid passing --pca/--pad_to_size/--use_lmeval_batching, then set args from eval_config."""
+    config_path = repo_path / "config.json"
+    if not config_path.exists():
+        return
+    with open(config_path) as f:
+        hf_config = json.load(f)
+    eval_config = hf_config.get("eval_config") or {}
+    if not eval_config:
+        return
+    # When using a Hub DISCO model with eval_config, user must not pass these; the model's values are used.
+    errors = []
+    if "pca" in eval_config and args.pca is not None:
+        errors.append(f"do not pass --pca (model uses pca={eval_config['pca']})")
+    if "pad_to_size" in eval_config and args.pad_to_size is not None:
+        errors.append(f"do not pass --pad_to_size (model uses pad_to_size={eval_config['pad_to_size']})")
+    if "use_lmeval_batching" in eval_config and args.use_lmeval_batching:
+        errors.append("do not pass --use_lmeval_batching (model uses use_lmeval_batching=True)")
+    if errors:
+        raise ValueError("When using a DISCO model from the Hub, " + "; ".join(errors) + ". Omit these flags to use the model's eval_config.")
+    if "pca" in eval_config:
+        args.pca = eval_config["pca"]
+    if "pad_to_size" in eval_config:
+        args.pad_to_size = eval_config["pad_to_size"]
+    if "use_lmeval_batching" in eval_config:
+        args.use_lmeval_batching = eval_config["use_lmeval_batching"]
+
+
+def _resolve_hf_disco_repo(
     disco_model_path: str,
     anchor_points_path: Optional[str],
-) -> Optional[str]:
-    """If anchor_points_path is None and model_path is an HF repo with anchor_points.json, return its path."""
-    if anchor_points_path is not None:
-        return anchor_points_path
+) -> tuple:
+    """If model_path is an HF repo, download and return (anchor_points_path, repo_path). Else (anchor_points_path, None).
+
+    anchor_points_path: path to anchor_points.json if repo has it and input was None; else input.
+    repo_path: path to the downloaded repo dir, or None if not an HF repo.
+    """
     if "/" not in disco_model_path or Path(disco_model_path).exists():
-        return None
+        return (anchor_points_path, None)
     try:
         from huggingface_hub import snapshot_download
     except ImportError:
-        return None
+        return (anchor_points_path, None)
     repo_path = Path(snapshot_download(disco_model_path))
-    ap_file = repo_path / "anchor_points.json"
-    if ap_file.exists():
-        return str(ap_file)
-    return None
+    if anchor_points_path is None and (repo_path / "anchor_points.json").exists():
+        return (str(repo_path / "anchor_points.json"), repo_path)
+    return (anchor_points_path, repo_path)
 
 
 def main():
     """Main entry point."""
     args = parse_args()
 
-    # Validate DISCO prediction arguments
+    # Validate DISCO prediction arguments and resolve HF repo (anchor points + eval_config)
     if args.disco_prediction:
         if args.disco_model_path is None:
             raise ValueError("--disco_model_path is required when --disco_prediction is enabled")
-        anchor_points_path_resolved = _resolve_anchor_points_path(args.disco_model_path, args.anchor_points_path)
+        anchor_points_path_resolved, hf_repo_path = _resolve_hf_disco_repo(args.disco_model_path, args.anchor_points_path)
         if anchor_points_path_resolved is None and args.anchor_points_path is None:
             raise ValueError(
                 "Anchor points required for DISCO prediction. Provide --anchor_points_path or use a "
@@ -1063,6 +1092,9 @@ def main():
             )
         if args.anchor_points_path is None and anchor_points_path_resolved:
             args.anchor_points_path = anchor_points_path_resolved
+        # Apply eval_config from HF repo when user left script defaults (so model's training config is used)
+        if hf_repo_path is not None:
+            _apply_eval_config_from_repo(hf_repo_path, args)
         if args.pca is not None and args.disco_transform_path is None:
             print("Warning: --pca specified without --disco_transform_path. Transform will be loaded from model file if available.")
 
