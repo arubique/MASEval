@@ -60,7 +60,6 @@ python mmlu_benchmark.py \
     --model_id "alignment-handbook/zephyr-7b-sft-full" \
     --data_path /path/to/mmlu_prompts_examples.json \
     --anchor_points_path /path/to/anchor_points_disagreement.pkl \
-    --use_full_prompt \
     --predictions_path ./output/predictions.pkl
 ```
 
@@ -73,7 +72,6 @@ python mmlu_benchmark.py \
     --model_id "alignment-handbook/zephyr-7b-sft-full" \
     --data_path /path/to/mmlu_prompts_examples.json \
     --anchor_points_path /path/to/anchor_points_disagreement.pkl \
-    --use_full_prompt \
     --disco_model_path /path/to/fitted_weights.pkl \
     --disco_transform_path /path/to/transform.pkl \
     --pca 256
@@ -143,10 +141,8 @@ python mmlu_benchmark.py \
 | `--anchor_points_path` | Path to anchor points pickle file | None |
 | `--output_dir` | Directory to save results | `./results` |
 | `--predictions_path` | Path to save predictions pickle (for DISCO) | None |
-| `--use_full_prompt` | Use full prompt with few-shot examples | False |
 | `--limit` | Limit number of tasks to evaluate | None |
 | `--device` | Device to run model on | `cuda:0` |
-| `--trust_remote_code` | Trust remote code when loading model | False |
 | `--num_workers` | Number of parallel workers | 1 |
 | `--disco_model_path` | If set, run DISCO prediction (.pkl, .npz, or HF repo id) | None |
 | `--disco_transform_path` | Path to DISCO PCA transform pickle | None |
