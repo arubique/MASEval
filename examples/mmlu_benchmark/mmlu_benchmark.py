@@ -1060,6 +1060,13 @@ def _apply_eval_config_from_repo(repo_path: Path, args: "argparse.Namespace") ->
         errors.append("do not pass --use_lmeval_batching (model uses use_lmeval_batching=True)")
     if errors:
         raise ValueError("When using a DISCO model from the Hub, " + "; ".join(errors) + ". Omit these flags to use the model's eval_config.")
+    # Require use_full_prompt and data_path to match model config
+    if "use_full_prompt" in eval_config and args.use_full_prompt != eval_config["use_full_prompt"]:
+        raise ValueError(f"When using this DISCO model, --use_full_prompt must be {eval_config['use_full_prompt']!r} (model config).")
+    if "data_path" in eval_config:
+        # Compare before _resolve_data_path overwrites; user must pass the expected repo id or path
+        if args.data_path != eval_config["data_path"]:
+            raise ValueError(f"When using this DISCO model, --data_path must be {eval_config['data_path']!r} (model config).")
     if "pca" in eval_config:
         args.pca = eval_config["pca"]
     if "pad_to_size" in eval_config:
@@ -1093,10 +1100,8 @@ def main():
     """Main entry point."""
     args = parse_args()
 
-    # Resolve --data_path if it is an HF dataset repo id (e.g. username/mmlu-prompts-examples)
-    args.data_path = _resolve_data_path(args.data_path)
-
     # Validate DISCO prediction arguments and resolve HF repo (anchor points + eval_config)
+    # Must run before _resolve_data_path so we can validate args.data_path against model config
     if args.disco_model_path is not None:
         anchor_points_path_resolved, hf_repo_path = _resolve_hf_disco_repo(args.disco_model_path, args.anchor_points_path)
         if anchor_points_path_resolved is None and args.anchor_points_path is None:
@@ -1118,6 +1123,9 @@ def main():
             args.anchor_points_path = anchor_points_path_resolved
         if args.pca is not None and args.disco_transform_path is None:
             print("Warning: --pca specified without --disco_transform_path. Transform will be loaded from model file if available.")
+
+    # Resolve --data_path if it is an HF dataset repo id (e.g. username/mmlu-prompts-examples)
+    args.data_path = _resolve_data_path(args.data_path)
 
     print("=" * 80)
     print("MMLU Benchmark - MASEval")
