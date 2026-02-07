@@ -15,6 +15,8 @@ class DiscoConfig(PretrainedConfig):
         sampling_name: str = "",
         number_item: str = "",
         fitted_model_type: str = "",
+        use_full_prompt: bool = True,
+        data_path: str = "",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -22,3 +24,5 @@ class DiscoConfig(PretrainedConfig):
         self.sampling_name = sampling_name
         self.number_item = number_item
         self.fitted_model_type = fitted_model_type
+        self.use_full_prompt = use_full_prompt
+        self.data_path = data_path

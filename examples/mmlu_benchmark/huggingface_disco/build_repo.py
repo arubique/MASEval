@@ -78,6 +78,24 @@ def main():
         action="store_true",
         help="Whether lm-eval batching was used; stored in eval_config for the benchmark when loading from HF.",
     )
+    parser.add_argument(
+        "--use_full_prompt",
+        action="store_true",
+        default=True,
+        help="Whether full prompts were used; stored in eval_config (default: True).",
+    )
+    parser.add_argument(
+        "--no_use_full_prompt",
+        action="store_false",
+        dest="use_full_prompt",
+        help="Disable use_full_prompt.",
+    )
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        default=None,
+        help="Data path or HF dataset repo id (e.g. arubique/flattened-MMLU); stored in eval_config.",
+    )
     args = parser.parse_args()
 
     weights_dir = Path(args.weights_dir)
@@ -115,8 +133,10 @@ def main():
         "sampling_name": meta.get("sampling_name", ""),
         "number_item": meta.get("number_item", ""),
         "fitted_model_type": meta.get("fitted_model_type", ""),
+        "use_full_prompt": args.use_full_prompt,
+        "data_path": args.data_path or "",
     }
-    # Eval config: when the benchmark loads this model from HF, it can apply these if the user did not override
+    # Eval config: when the benchmark loads this model from HF, it validates these
     eval_config = {}
     if args.pca is not None:
         eval_config["pca"] = args.pca
@@ -124,6 +144,9 @@ def main():
         eval_config["pad_to_size"] = args.pad_to_size
     if args.use_lmeval_batching:
         eval_config["use_lmeval_batching"] = True
+    eval_config["use_full_prompt"] = args.use_full_prompt
+    if args.data_path is not None:
+        eval_config["data_path"] = args.data_path
     if eval_config:
         config["eval_config"] = eval_config
     config_path = output_dir / "config.json"
