@@ -88,9 +88,21 @@ This dataset is a flattened reformatting of the original [MMLU](https://huggingf
 
 The original MMLU has 57 subject categories (anatomy, abstract algebra, virology, etc.). This dataset drops the per-category structure and concatenates all questions into a single ordered list of ~14k questions, preserving a fixed ordering for reproducible evaluation.
 
+### The `query` field
+
+The question text with answer choices, formatted for zero-shot evaluation (e.g. "Question...\\nA. ...\\nB. ...\\nC. ...\\nD. ...\\nAnswer:"). When the benchmark uses zero-shot mode instead of `full_prompt`, the model receives this input.
+
+### The `example` field
+
+Optional. The question text with the ground-truth answer inserted (query + correct answer). Used for few-shot examples mining and related applications.
+
 ### The `full_prompt` field
 
 For each question, we randomly select 10 few-shot examples from the same category. The `full_prompt` field includes the question along with these in-context few-shot examples as well as category-specific prompt prefix. This design ensures evaluation reproducibility by fixing the few-shot examples for every run.
+
+### The `gold` field
+
+0-based index into `choices` indicating the correct answer. For example, `gold: 0` means the first choice (A) is correct; `gold: 1` means the second choice (B) is correct.
 
 ## Attribution / Acknowledgment
 
