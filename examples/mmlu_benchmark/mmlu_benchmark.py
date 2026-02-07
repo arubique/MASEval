@@ -21,15 +21,13 @@ Usage:
     python mmlu_benchmark.py \\
         --model_id "alignment-handbook/zephyr-7b-sft-full" \\
         --data_path /path/to/mmlu_prompts_examples.json \\
-        --anchor_points_path /path/to/anchor_points_disagreement.pkl \\
-        --use_full_prompt
+        --anchor_points_path /path/to/anchor_points_disagreement.pkl
 
     # Run with DISCO prediction (passing --disco_model_path enables it)
     python mmlu_benchmark.py \\
         --model_id "alignment-handbook/zephyr-7b-sft-full" \\
         --data_path /path/to/mmlu_prompts_examples.json \\
         --anchor_points_path /path/to/anchor_points_disagreement.pkl \\
-        --use_full_prompt \\
         --disco_model_path /path/to/fitted_weights.pkl \\
         --disco_transform_path /path/to/transform.pkl \\
         --pca 256
@@ -101,11 +99,6 @@ def parse_args():
         help="Path to save predictions tensor as pickle (for DISCO predictor)",
     )
     parser.add_argument(
-        "--use_full_prompt",
-        action="store_true",
-        help="Use full prompt with few-shot examples instead of just the query",
-    )
-    parser.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -122,11 +115,6 @@ def parse_args():
         type=str,
         default="cuda:0",
         help="Device to run model on (e.g., 'cuda:0', 'cpu')",
-    )
-    parser.add_argument(
-        "--trust_remote_code",
-        action="store_true",
-        help="Trust remote code when loading model",
     )
     parser.add_argument(
         "--num_workers",
@@ -185,8 +173,8 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         self,
         model_id: str,
         device: str = "cuda:0",
-        trust_remote_code: bool = False,
-        use_full_prompt: bool = False,
+        trust_remote_code: bool = True,
+        use_full_prompt: bool = True,
         batch_size: int = 8,
         **kwargs,
     ):
@@ -195,8 +183,8 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         Args:
             model_id: HuggingFace model identifier.
             device: Device to run model on.
-            trust_remote_code: Trust remote code when loading model.
-            use_full_prompt: Use full prompt with few-shot examples.
+            trust_remote_code: Trust remote code when loading model (default True).
+            use_full_prompt: Use full prompt with few-shot examples (default True).
             batch_size: Batch size for evaluation (number of questions per batch).
             **kwargs: Additional arguments passed to MMLUBenchmark.
         """
@@ -1060,9 +1048,7 @@ def _apply_eval_config_from_repo(repo_path: Path, args: "argparse.Namespace") ->
         errors.append("do not pass --use_lmeval_batching (model uses use_lmeval_batching=True)")
     if errors:
         raise ValueError("When using a DISCO model from the Hub, " + "; ".join(errors) + ". Omit these flags to use the model's eval_config.")
-    # Require use_full_prompt and data_path to match model config
-    if "use_full_prompt" in eval_config and args.use_full_prompt != eval_config["use_full_prompt"]:
-        raise ValueError(f"When using this DISCO model, --use_full_prompt must be {eval_config['use_full_prompt']!r} (model config).")
+    # Require data_path to match model config (use_full_prompt is always True)
     if "data_path" in eval_config:
         # Compare before _resolve_data_path overwrites; user must pass the expected repo id or path
         if args.data_path != eval_config["data_path"]:
@@ -1133,7 +1119,7 @@ def main():
     print(f"Model: {args.model_id}")
     print(f"Data path: {args.data_path}")
     print(f"Anchor points: {args.anchor_points_path or 'None (evaluate all)'}")
-    print(f"Use full prompt: {args.use_full_prompt}")
+    print("Use full prompt: True")
     print(f"Device: {args.device}")
     print(f"Output dir: {args.output_dir}")
     if args.disco_model_path is not None:
@@ -1173,8 +1159,8 @@ def main():
     benchmark = HuggingFaceMMLUBenchmark(
         model_id=args.model_id,
         device=args.device,
-        trust_remote_code=args.trust_remote_code,
-        use_full_prompt=args.use_full_prompt,
+        trust_remote_code=True,
+        use_full_prompt=True,
         callbacks=[logger],
         num_workers=args.num_workers,
     )
@@ -1190,7 +1176,7 @@ def main():
     print("\nRunning evaluation...")
     agent_data = {
         "model_id": args.model_id,
-        "use_full_prompt": args.use_full_prompt,
+        "use_full_prompt": True,
     }
     results = benchmark.run(tasks=tasks, agent_data=agent_data)
 
@@ -1251,7 +1237,7 @@ def main():
         "model_id": args.model_id,
         "data_path": str(args.data_path),
         "anchor_points_path": str(args.anchor_points_path) if args.anchor_points_path else None,
-        "use_full_prompt": args.use_full_prompt,
+        "use_full_prompt": True,
         "metrics": metrics,
     }
 
