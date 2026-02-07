@@ -62,7 +62,20 @@ def main():
 
     readme = output_dir / "README.md"
     readme.write_text(
-        f"""# MMLU prompts (flattened)
+        f"""---
+language:
+- en
+pretty_name: MMLU prompts (flattened)
+license: mit
+task_categories:
+- question-answering
+tags:
+- mmlu
+- multiple-choice
+- llm-evaluation
+---
+
+# MMLU prompts (flattened)
 
 This dataset is a flattened reformatting of the original [MMLU](https://huggingface.co/datasets/cais/mmlu) benchmark, in the format expected by [MASEval](https://github.com/parameterlab/MASEval)'s MMLU benchmark with support for accelerated [DISCO](https://arubique.github.io/disco-site/) evaluation.
 
