@@ -90,7 +90,7 @@ The original MMLU has 57 subject categories (anatomy, abstract algebra, virology
 
 ### The `full_prompt` field
 
-For each question, we randomly select 10 few-shot examples from the same category. The `full_prompt` field includes the question along with these in-context few-shot examples. This design ensures evaluation reproducibility by fixing the few-shot examples for every run.
+For each question, we randomly select 10 few-shot examples from the same category. The `full_prompt` field includes the question along with these in-context few-shot examples as well as category-specific prompt prefix. This design ensures evaluation reproducibility by fixing the few-shot examples for every run.
 
 ## Attribution / Acknowledgment
 
