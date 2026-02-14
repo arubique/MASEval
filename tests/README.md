@@ -60,7 +60,7 @@ Six jobs in `.github/workflows/test.yml`:
 | Job               | Python    | What it runs                      | Gate                   |
 | ----------------- | --------- | --------------------------------- | ---------------------- |
 | test-core         | 3.10–3.14 | `-m core`                         | —                      |
-| test-benchmark    | 3.10–3.14 | `-m benchmark`                    | —                      |
+| test-benchmark    | 3.10–3.14 | `-m "benchmark and not (slow or live)"` | —                |
 | test-all          | 3.10–3.14 | `pytest -v` (default filter)      | After core + benchmark |
 | test-slow         | 3.12      | `-m "slow and not credentialed"`  | —                      |
 | test-credentialed | 3.12      | `-m "credentialed and not smoke"` | Maintainer approval    |
@@ -82,7 +82,8 @@ tests/
 └── test_benchmarks/            # Benchmark tests (marked benchmark)
     ├── test_tau2/              # Tau2 benchmark + data integrity
     ├── test_macs/              # MACS benchmark + data integrity
-    └── test_gaia2/             # GAIA2 benchmark
+    ├── test_gaia2/             # GAIA2 benchmark + data integrity
+    └── test_multiagentbench/   # MultiAgentBench + data integrity
 ```
 
 ### `test_core/` — Unit tests
