@@ -2871,7 +2871,7 @@ wheels = [
 [[package]]
 name = "lm-eval"
 version = "0.4.9.1"
-source = { git = "https://github.com/arubique/lm-evaluation-harness.git#0ad42c62a675c3d9b5c8cc23d82729ede2181e26" }
+source = { git = "https://github.com/arubique/lm-evaluation-harness.git?rev=main#0ad42c62a675c3d9b5c8cc23d82729ede2181e26" }
 dependencies = [
     { name = "accelerate" },
     { name = "datasets" },
@@ -3340,7 +3340,8 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.0.0" },
     { name = "litellm", marker = "extra == 'multiagentbench'", specifier = ">=1.0.0" },
     { name = "llama-index-core", marker = "extra == 'llamaindex'", specifier = ">=0.12.0" },
-    { name = "lm-eval", marker = "extra == 'disco'", git = "https://github.com/arubique/lm-evaluation-harness.git" },
+    { name = "lm-eval", marker = "extra == 'disco'", git = "https://github.com/arubique/lm-evaluation-harness.git?rev=main" },
+    { name = "lm-eval", marker = "extra == 'lm-eval'", git = "https://github.com/arubique/lm-evaluation-harness.git?rev=main" },
     { name = "maseval", extras = ["examples", "transformers", "wandb"], marker = "extra == 'all'" },
     { name = "maseval", extras = ["smolagents", "langgraph", "llamaindex", "anthropic", "openai", "google-genai", "litellm", "langfuse", "disco"], marker = "extra == 'examples'" },
     { name = "matplotlib", marker = "extra == 'disco'", specifier = ">=3.5.0" },
@@ -3370,7 +3371,7 @@ requires-dist = [
     { name = "waitress", marker = "extra == 'multiagentbench'", specifier = ">=3.0.0" },
     { name = "wandb", marker = "extra == 'wandb'", specifier = ">=0.15.0" },
 ]
-provides-extras = ["smolagents", "langgraph", "llamaindex", "anthropic", "openai", "google-genai", "transformers", "litellm", "wandb", "langfuse", "disco", "examples", "all"]
+provides-extras = ["smolagents", "langgraph", "llamaindex", "anthropic", "openai", "google-genai", "transformers", "litellm", "wandb", "langfuse", "lm-eval", "disco", "examples", "all"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -810,12 +810,6 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         Returns:
             Dict mapping doc_id -> list of log-likelihoods for each choice.
         """
-        import sys
-
-        # Add lm-eval to path
-        sys.path.insert(0, "/home/oh/arubinstein17/github/disco-public")
-        sys.path.insert(0, "/home/oh/arubinstein17/github/disco-public/external/lm-evaluation-harness")
-
         from lm_eval.models.huggingface import HFLM
         from lm_eval.api.instance import Instance
 
