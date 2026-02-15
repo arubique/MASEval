@@ -23,6 +23,16 @@ Usage:
 """
 
 from .mmlu import (
+    DEFAULT_AGENT_NAME,
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_CHOICES,
+    DEFAULT_DEVICE,
+    DEFAULT_MODEL_REGISTER_NAME,
+    FALLBACK_MODEL_ID,
+    MMLU_TASK_NAME,
+    STATUS_SUCCESS,
+    TARGET_DELIMITER,
+    TASK_TYPE_MMLU,
     MMLUBenchmark,
     HuggingFaceMMLUBenchmark,
     MMLUEnvironment,
@@ -35,6 +45,16 @@ from .mmlu import (
 )
 
 __all__ = [
+    "DEFAULT_AGENT_NAME",
+    "DEFAULT_BATCH_SIZE",
+    "DEFAULT_CHOICES",
+    "DEFAULT_DEVICE",
+    "DEFAULT_MODEL_REGISTER_NAME",
+    "FALLBACK_MODEL_ID",
+    "MMLU_TASK_NAME",
+    "STATUS_SUCCESS",
+    "TARGET_DELIMITER",
+    "TASK_TYPE_MMLU",
     "MMLUBenchmark",
     "HuggingFaceMMLUBenchmark",
     "MMLUEnvironment",

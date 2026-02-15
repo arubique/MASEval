@@ -41,6 +41,7 @@ Usage:
 
 import argparse
 import json
+import os
 import pickle
 from pathlib import Path
 from typing import Optional
@@ -52,10 +53,24 @@ from maseval.core.callbacks.result_logger import FileResultLogger
 
 # MMLU benchmark imports
 from maseval.benchmark.mmlu import (
+    DEFAULT_DEVICE,
     HuggingFaceMMLUBenchmark,
     load_tasks,
     compute_benchmark_metrics,
 )
+
+
+# Example constants (configurable)
+DEFAULT_OUTPUT_DIR = "./results"
+DEFAULT_N_CHOICES = 4
+DEFAULT_PCA_DIM = 256
+PCA_RANDOM_STATE = 42
+DISCO_META_FILENAME = "disco_meta.json"
+MMLU_PROMPTS_FILENAME = "mmlu_prompts_examples.json"
+DISCO_CONFIG_FILENAME = "config.json"
+ANCHOR_POINTS_FILENAME = "anchor_points.json"
+RESULTS_FILENAME_PATTERN = "mmlu_{timestamp}.jsonl"
+SUMMARY_FILENAME = "summary.json"
 
 
 def parse_args():
@@ -89,7 +104,7 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="./results",
+        default=DEFAULT_OUTPUT_DIR,
         help="Directory to save results",
     )
     parser.add_argument(
@@ -113,7 +128,7 @@ def parse_args():
     parser.add_argument(
         "--device",
         type=str,
-        default="cuda:0",
+        default=DEFAULT_DEVICE,
         help="Device to run model on (e.g., 'cuda:0', 'cpu')",
     )
     parser.add_argument(
@@ -161,7 +176,7 @@ def save_predictions_for_disco(
     results: list,
     output_path: str,
     anchor_points: Optional[list] = None,
-    n_choices: int = 4,
+    n_choices: int = DEFAULT_N_CHOICES,
     pad_to_size: Optional[int] = None,
 ):
     """Save predictions in format compatible with DISCO predictor.
@@ -239,7 +254,7 @@ def save_predictions_for_disco(
 
     predictions = predictions.reshape(1, -1, predictions.shape[-1])  # (1, n_questions, n_choices)
 
-    if output_path and output_path != "/dev/null":
+    if output_path and output_path != os.devnull:
         with open(output_path, "wb") as f:
             pickle.dump(predictions, f)
         print(f"Saved predictions tensor to {output_path}")
@@ -334,7 +349,7 @@ def load_disco_from_npz(
         return _predict_rf_numpy(X, tree_node_counts, children_left, children_right, feature, threshold, value)
 
     if meta_path is None:
-        meta_path = str(Path(model_npz_path).parent / "disco_meta.json")
+        meta_path = str(Path(model_npz_path).parent / DISCO_META_FILENAME)
     with open(meta_path) as f:
         meta = json.load(f)
     transform_npz = {"components_": components, "mean_": mean}
@@ -395,7 +410,7 @@ def compute_disco_embedding(
             transform = PCA(
                 n_components=pca,
                 svd_solver="full",
-                random_state=42,
+                random_state=PCA_RANDOM_STATE,
             ).fit(X)
             emb = transform.transform(X)
             emb = torch.Tensor(emb)
@@ -409,7 +424,7 @@ def predict_with_disco(
     predictions: np.ndarray,
     model_path: str,
     transform_path: Optional[str] = None,
-    pca: int = 256,
+    pca: int = DEFAULT_PCA_DIM,
 ) -> dict:
     """Predict full benchmark performance using DISCO.
 
@@ -542,7 +557,7 @@ def _resolve_data_path(data_path: str) -> str:
     try:
         local = hf_hub_download(
             repo_id=data_path,
-            filename="mmlu_prompts_examples.json",
+            filename=MMLU_PROMPTS_FILENAME,
             repo_type="dataset",
         )
         return local
@@ -552,7 +567,7 @@ def _resolve_data_path(data_path: str) -> str:
 
 def _apply_eval_config_from_repo(repo_path: Path, args: "argparse.Namespace") -> None:
     """Load eval_config from repo; forbid passing --pca/--pad_to_size/--use_lmeval_batching, then set args from eval_config."""
-    config_path = repo_path / "config.json"
+    config_path = repo_path / DISCO_CONFIG_FILENAME
     if not config_path.exists():
         return
     with open(config_path) as f:
@@ -599,8 +614,8 @@ def _resolve_hf_disco_repo(
     except ImportError:
         return (anchor_points_path, None)
     repo_path = Path(snapshot_download(disco_model_path))
-    if anchor_points_path is None and (repo_path / "anchor_points.json").exists():
-        return (str(repo_path / "anchor_points.json"), repo_path)
+    if anchor_points_path is None and (repo_path / ANCHOR_POINTS_FILENAME).exists():
+        return (str(repo_path / ANCHOR_POINTS_FILENAME), repo_path)
     return (anchor_points_path, repo_path)
 
 
@@ -673,7 +688,7 @@ def main():
     # Create result logger
     logger = FileResultLogger(
         output_dir=str(output_dir),
-        filename_pattern="mmlu_{timestamp}.jsonl",
+        filename_pattern=RESULTS_FILENAME_PATTERN,
         validate_on_completion=False,
     )
 
@@ -762,7 +777,7 @@ def main():
             "pca": disco_results["pca"],
         }
 
-    summary_path = output_dir / "summary.json"
+    summary_path = output_dir / SUMMARY_FILENAME
     with open(summary_path, "w") as f:
         json.dump(summary_data, f, indent=2)
 

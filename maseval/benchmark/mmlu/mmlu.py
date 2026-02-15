@@ -58,6 +58,22 @@ from maseval.core.config import ConfigurableMixin
 
 
 # =============================================================================
+# Constants (configurable defaults)
+# =============================================================================
+
+DEFAULT_CHOICES = ["A", "B", "C", "D"]
+DEFAULT_DEVICE = "cuda:0"
+DEFAULT_BATCH_SIZE = 8
+DEFAULT_AGENT_NAME = "mmlu_agent"
+DEFAULT_MODEL_REGISTER_NAME = "mmlu_model"
+TARGET_DELIMITER = " "  # lm-eval convention for MCQ
+MMLU_TASK_NAME = "mmlu_prompts"
+TASK_TYPE_MMLU = "mmlu"
+FALLBACK_MODEL_ID = "unknown"
+STATUS_SUCCESS = "success"
+
+
+# =============================================================================
 # Task Queue
 # =============================================================================
 
@@ -219,7 +235,7 @@ class MMLUEvaluator(Evaluator):
         self.task = task
         self.environment = environment
         self.gold = task.evaluation_data.get("gold", 0)
-        self.choices = task.environment_data.get("choices", ["A", "B", "C", "D"])
+        self.choices = task.environment_data.get("choices", DEFAULT_CHOICES)
 
     def filter_traces(self, traces: Dict[str, Any]) -> Dict[str, Any]:
         """Extract relevant traces for evaluation.
@@ -289,12 +305,12 @@ class MMLUEvaluator(Evaluator):
         response = response.strip().upper()
 
         # Direct letter match
-        for i, choice in enumerate(["A", "B", "C", "D"]):
+        for i, choice in enumerate(DEFAULT_CHOICES):
             if response == choice or response.startswith(f"{choice}."):
                 return i
 
         # Look for "answer is X" pattern
-        for i, choice in enumerate(["A", "B", "C", "D"]):
+        for i, choice in enumerate(DEFAULT_CHOICES):
             if f"ANSWER IS {choice}" in response:
                 return i
             if f"ANSWER: {choice}" in response:
@@ -302,7 +318,7 @@ class MMLUEvaluator(Evaluator):
 
         # Last character check
         last_char = response.rstrip(".")[-1] if response else ""
-        for i, choice in enumerate(["A", "B", "C", "D"]):
+        for i, choice in enumerate(DEFAULT_CHOICES):
             if last_char == choice:
                 return i
 
@@ -321,7 +337,7 @@ class MMLUModelAgent(TraceableMixin, ConfigurableMixin):
     and returns the response. It supports tracing for MASEval integration.
     """
 
-    def __init__(self, model: ModelAdapter, name: str = "mmlu_agent"):
+    def __init__(self, model: ModelAdapter, name: str = DEFAULT_AGENT_NAME):
         """Initialize MMLU model agent.
 
         Args:
@@ -495,13 +511,13 @@ class MMLUBenchmark(Benchmark):
         Returns:
             Tuple of (agents_to_run, agents_dict).
         """
-        model_id = agent_data.get("model_id", "unknown")
-        model = self.get_model_adapter(model_id, register_name="mmlu_model")
+        model_id = agent_data.get("model_id", FALLBACK_MODEL_ID)
+        model = self.get_model_adapter(model_id, register_name=DEFAULT_MODEL_REGISTER_NAME)
 
-        agent = MMLUModelAgent(model, name="mmlu_agent")
-        adapter = MMLUAgentAdapter(agent, "mmlu_agent")
+        agent = MMLUModelAgent(model, name=DEFAULT_AGENT_NAME)
+        adapter = MMLUAgentAdapter(agent, DEFAULT_AGENT_NAME)
 
-        return [adapter], {"mmlu_agent": adapter}
+        return [adapter], {DEFAULT_AGENT_NAME: adapter}
 
     def setup_evaluators(
         self,
@@ -574,10 +590,10 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
     def __init__(
         self,
         model_id: str,
-        device: str = "cuda:0",
+        device: str = DEFAULT_DEVICE,
         trust_remote_code: bool = True,
         use_full_prompt: bool = True,
-        batch_size: int = 8,
+        batch_size: int = DEFAULT_BATCH_SIZE,
         **kwargs,
     ):
         """Initialize HuggingFace MMLU benchmark.
@@ -713,7 +729,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         model, _ = self._load_model()
 
         # lm-eval uses target_delimiter=" " for multiple choice tasks
-        target_delimiter = " "
+        target_delimiter = TARGET_DELIMITER
 
         # Encode first choice to get the shared context
         first_continuation = f"{target_delimiter}{choices[0]}"
@@ -813,8 +829,8 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         )
 
         # lm-eval uses target_delimiter=" " for multiple choice tasks
-        target_delimiter = " "
-        choices = ["A", "B", "C", "D"]
+        target_delimiter = TARGET_DELIMITER
+        choices = DEFAULT_CHOICES
         continuations = [f"{target_delimiter}{c}" for c in choices]
 
         # Build ALL instances like lm-eval task system does
@@ -835,7 +851,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
                     doc={"doc_id": doc_id},
                     arguments=(prompt, cont),
                     idx=i,
-                    metadata=("mmlu_prompts", doc_id, 1),
+                    metadata=(MMLU_TASK_NAME, doc_id, 1),
                 )
                 instance_map[(doc_id, i)] = len(all_instances)
                 all_instances.append(inst)
@@ -879,7 +895,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         model, _ = self._load_model()
 
         # lm-eval uses target_delimiter=" " for multiple choice tasks
-        target_delimiter = " "
+        target_delimiter = TARGET_DELIMITER
 
         all_logprobs = []
         for choice in choices:
@@ -930,7 +946,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         """
         # Get the prompt from environment
         prompt = environment.get_prompt()
-        choices = environment.state.get("choices", ["A", "B", "C", "D"])
+        choices = environment.state.get("choices", DEFAULT_CHOICES)
         doc_id = task.metadata.get("doc_id") if task else None
 
         # Check if we have precomputed logprobs (for exact lm-eval match)
@@ -963,7 +979,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         self._load_model()
 
         # lm-eval uses target_delimiter=" " for multiple choice tasks
-        target_delimiter = " "
+        target_delimiter = TARGET_DELIMITER
 
         # Check if all choices result in single-token continuations
         # using _encode_pair to get the correct tokenization
@@ -1102,7 +1118,7 @@ def load_tasks(
             query=item.get("query", item.get("example", "")),
             id=f"mmlu_{i}",
             environment_data={
-                "choices": item.get("choices", ["A", "B", "C", "D"]),
+                "choices": item.get("choices", DEFAULT_CHOICES),
                 "full_prompt": item.get("full_prompt", ""),
                 "example": item.get("example", ""),
             },
@@ -1111,7 +1127,7 @@ def load_tasks(
             },
             metadata={
                 "doc_id": i,
-                "task_type": "mmlu",
+                "task_type": TASK_TYPE_MMLU,
             },
         )
         tasks.append(task)
@@ -1150,7 +1166,7 @@ def compute_benchmark_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     acc_norm_sum = 0.0
 
     for res in results:
-        if res.get("status") != "success":
+        if res.get("status") != STATUS_SUCCESS:
             continue
 
         evals = res.get("eval") or []
