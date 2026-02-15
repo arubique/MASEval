@@ -84,6 +84,8 @@ tau2 = ["docstring-parser>=0.16"]
 # Dependencies for running examples (only what's actually used)
 examples = [
     "maseval[smolagents,langgraph,llamaindex,camel,anthropic,openai,google-genai,litellm,langfuse,gaia2,macs,tau2]",
+]
+
 # LM Evaluation Harness (for HuggingFaceMMLUBenchmark.precompute_all_logprobs_lmeval)
 lm-eval = ["lm-eval @ git+https://github.com/arubique/lm-evaluation-harness.git@main"]
 
