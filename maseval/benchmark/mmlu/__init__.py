@@ -24,6 +24,7 @@ Usage:
 
 from .mmlu import (
     MMLUBenchmark,
+    HuggingFaceMMLUBenchmark,
     MMLUEnvironment,
     MMLUEvaluator,
     MMLUModelAgent,
@@ -35,6 +36,7 @@ from .mmlu import (
 
 __all__ = [
     "MMLUBenchmark",
+    "HuggingFaceMMLUBenchmark",
     "MMLUEnvironment",
     "MMLUEvaluator",
     "MMLUModelAgent",
