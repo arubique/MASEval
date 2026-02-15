@@ -473,6 +473,7 @@ class MMLUBenchmark(Benchmark):
         self,
         agent_data: Dict[str, Any],
         task: Task,
+        **kwargs: Any,
     ) -> MMLUEnvironment:
         """Create environment for a task."""
         task_data = {
@@ -489,6 +490,7 @@ class MMLUBenchmark(Benchmark):
         agent_data: Dict[str, Any],
         environment: MMLUEnvironment,
         task: Task,
+        **kwargs: Any,
     ) -> None:
         """MMLU doesn't use a user simulator."""
         return None
@@ -499,6 +501,7 @@ class MMLUBenchmark(Benchmark):
         environment: MMLUEnvironment,
         task: Task,
         user: Optional[Any],
+        **kwargs: Any,
     ) -> Tuple[Sequence[AgentAdapter], Dict[str, AgentAdapter]]:
         """Create model agent for MCQ evaluation.
 
@@ -525,6 +528,7 @@ class MMLUBenchmark(Benchmark):
         task: Task,
         agents: Sequence[AgentAdapter],
         user: Optional[Any],
+        **kwargs: Any,
     ) -> Sequence[Evaluator]:
         """Create MMLU evaluator."""
         return [MMLUEvaluator(task, environment)]
