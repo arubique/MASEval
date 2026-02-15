@@ -71,6 +71,34 @@ uv run ruff format .
 
 Both approaches work equally well! Use whichever you prefer. The `uv run` approach is convenient if you don't want to activate the environment, as it automatically uses the correct virtual environment for each command.
 
+**Option 3: Use `just`** (recommended)
+
+We provide a [`justfile`](https://github.com/casey/just) as a command runner for common development tasks. This is the easiest way to run commands — no need to remember long `uv run` invocations.
+
+```bash
+# Install just (if not already installed)
+brew install just    # macOS
+# or: cargo install just
+
+# List all available commands
+just
+
+# Examples
+just test            # Run default test suite
+just test-core       # Run core tests
+just check           # Run all quality checks (format, lint, typecheck)
+just docs            # Serve documentation locally
+```
+
+All `just` recipes accept extra arguments. For example:
+
+```bash
+just test-core -x --tb=short    # Stop on first failure, short tracebacks
+just test-benchmark -k "macs"   # Run only MACS benchmark tests
+```
+
+> **Note**: All commands also work with `uv run` directly — `just` is a convenience wrapper.
+
 ### 2. Code Style and Linting
 
 We use `ruff` to enforce a consistent code style. Before committing, please run the formatter and linter.
@@ -83,8 +111,6 @@ ruff format .
 ruff check . --fix
 ```
 
-If you haven't activated your virtual environment, you can use `uv run ruff format .` and `uv run ruff check . --fix` instead.
-
 For convenience, you can enable **pre-commit hooks** to automatically format and lint code on every commit:
 
 ```bash
@@ -92,6 +118,7 @@ uv run pre-commit install
 ```
 
 This is optional—CI will catch any issues regardless. But if enabled, the hooks will:
+
 - **Format** code with `ruff format` (using project settings from `pyproject.toml`)
 - **Lint and auto-fix** issues with `ruff check --fix`
 
@@ -212,9 +239,9 @@ The pipeline automatically performs the following tasks:
 
 - **Linting and Formatting**: Verifies that your code adheres to our style guide using `ruff`.
 - **Testing** (tiered):
-  - *Fast tests* (every PR, Python 3.10–3.14): core, benchmark, and all default-suite tests. No API keys needed.
-  - *Slow tests* (every PR, Python 3.12): data download and integrity validation.
-  - *Credentialed tests* (every PR, Python 3.12): live API tests. Requires maintainer approval to run — secrets are only exposed after approval.
+  - _Fast tests_ (every PR, Python 3.10–3.14): core, benchmark, and all default-suite tests. No API keys needed.
+  - _Slow tests_ (every PR, Python 3.12): data download and integrity validation.
+  - _Credentialed tests_ (every PR, Python 3.12): live API tests. Requires maintainer approval to run — secrets are only exposed after approval.
 - **Type Checking**: Validates type annotations using `ty`.
 - **Documentation**: Ensures documentation builds without errors using `mkdocs`.
 
