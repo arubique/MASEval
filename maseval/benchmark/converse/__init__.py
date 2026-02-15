@@ -1,16 +1,19 @@
 """CONVERSE Benchmark — Contextual Safety in Agent-to-Agent Conversations.
 
+Adapted from ConVerse (https://github.com/amrgomaaelhady/ConVerse, commit d474f6a).
+Original work licensed under the MIT License.
+
+Citation:
+    Gomaa, A., Salem, A., & Abdelnabi, S. (2025). ConVerse: Benchmarking Contextual
+    Safety in Agent-to-Agent Conversations. arXiv:2511.05359.
+
 Framework-agnostic implementation of the CONVERSE benchmark for evaluating
 the resilience of LLM-based assistants against adversarial social-engineering
 attacks from external service-provider agents.
 
-Original benchmark: https://github.com/amrgomaaelhady/ConVerse
-Reference Paper: "ConVerse: Contextual Safety in Agent-to-Agent Conversations"
-https://arxiv.org/abs/2506.15753
-
 Domains:
 
-- travel: Travel planning scenarios (4 personas)
+- travel_planning: Travel planning scenarios (4 personas)
 - real_estate: Real estate advisory scenarios (4 personas)
 - insurance: Insurance consultation scenarios (4 personas)
 
@@ -24,10 +27,10 @@ Usage::
     )
 
     # Ensure domain data is downloaded
-    ensure_data_exists(domain="travel")
+    ensure_data_exists(domain="travel_planning")
 
     # Load tasks for a domain
-    tasks = load_tasks("travel", split="all", limit=5)
+    tasks = load_tasks("travel_planning", split="all", limit=5)
 
     # Create your framework-specific benchmark subclass
     class MyConverseBenchmark(ConverseBenchmark):
@@ -47,9 +50,9 @@ Usage::
 """
 
 from .converse import ConverseBenchmark, DefaultAgentConverseBenchmark, DefaultConverseAgent, DefaultConverseAgentAdapter
-from .data_loader import ConverseDomain, ensure_data_exists, load_tasks
+from .data_loader import ConverseDomain, configure_model_ids, ensure_data_exists, load_tasks
 from .environment import ConverseEnvironment
-from .evaluator import PrivacyEvaluator, SecurityEvaluator
+from .evaluator import PrivacyEvaluator, SecurityEvaluator, UtilityEvaluator
 from .external_agent import ConverseExternalAgent
 
 __all__ = [
@@ -61,7 +64,9 @@ __all__ = [
     "ConverseExternalAgent",
     "PrivacyEvaluator",
     "SecurityEvaluator",
+    "UtilityEvaluator",
     "ConverseDomain",
+    "configure_model_ids",
     "load_tasks",
     "ensure_data_exists",
 ]

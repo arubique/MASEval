@@ -1,25 +1,36 @@
 """Data loading utilities for the CONVERSE benchmark.
 
+Adapted from ConVerse (https://github.com/amrgomaaelhady/ConVerse, commit d474f6a).
+Original work licensed under the MIT License.
+
+Citation:
+    Gomaa, A., Salem, A., & Abdelnabi, S. (2025). ConVerse: Benchmarking Contextual
+    Safety in Agent-to-Agent Conversations. arXiv:2511.05359.
+
 CONVERSE data files are fetched on demand from the upstream benchmark repository.
 Raw dataset files are not bundled in the package.
 """
 
 import json
+import logging
+import re
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 from maseval import Task, TaskProtocol, TaskQueue
 
-ConverseDomain = Literal["travel", "real_estate", "insurance"]
+logger = logging.getLogger(__name__)
+
+ConverseDomain = Literal["travel_planning", "real_estate", "insurance"]
 
 GITHUB_BASE = "https://raw.githubusercontent.com/amrgomaaelhady/ConVerse"
 DEFAULT_VERSION = "main"
 REPO_BASE_URL = f"{GITHUB_BASE}/{DEFAULT_VERSION}/resources"
 LOCAL_DATA_DIR = Path(__file__).parent / "data"
 DOMAIN_MAP: Dict[ConverseDomain, str] = {
-    "travel": "travel_planning_usecase",
+    "travel_planning": "travel_planning_usecase",
     "real_estate": "real_estate_usecase",
     "insurance": "insurance_usecase",
 }
@@ -88,6 +99,10 @@ def ensure_data_exists(
                     f"{REPO_BASE_URL}/{use_case_dir}/security_attacks/security_attacks_persona{persona_id}.json",
                     data_root / domain / "security" / f"attacks_p{persona_id}.json",
                 ),
+                (
+                    f"{REPO_BASE_URL}/{use_case_dir}/ratings/ratings_persona{persona_id}.json",
+                    data_root / domain / "ratings" / f"ratings_p{persona_id}.json",
+                ),
             ]
         )
 
@@ -99,42 +114,164 @@ def ensure_data_exists(
     return data_root
 
 
+def parse_persona_text(env_text: str) -> Dict[str, Any]:
+    """Parse a ``env_persona<N>.txt`` file into structured data.
+
+    The persona text files contain semi-structured sections for general
+    information, emails, calendar entries, medical insurance data, and
+    banking information.  This parser extracts them into dictionaries
+    suitable for the environment tools.
+
+    Args:
+        env_text: Full contents of an ``env_persona<N>.txt`` file.
+
+    Returns:
+        Dictionary with keys ``"general_info"`` (str), ``"emails"``
+        (list of dicts), ``"calendar"`` (list of dicts), ``"banking"``
+        (str), ``"medical"`` (str), and ``"raw_text"`` (str).
+    """
+    result: Dict[str, Any] = {
+        "general_info": "",
+        "emails": [],
+        "calendar": [],
+        "banking": "",
+        "medical": "",
+        "raw_text": env_text,
+    }
+
+    if not env_text.strip():
+        return result
+
+    # Split into major sections by "Toolkits:" header
+    parts = re.split(r"(?m)^Toolkits:\s*$", env_text, maxsplit=1)
+    if len(parts) >= 1:
+        result["general_info"] = parts[0].strip()
+
+    if len(parts) < 2:
+        return result
+
+    toolkit_text = parts[1]
+
+    # Split toolkit text into numbered sections: "1) Emails:", "2) Calendar:", etc.
+    section_pattern = re.compile(r"(?m)^\s*(\d+)\)\s+(.+?)(?::\s*)?$")
+    sections: List[Dict[str, str]] = []
+    matches = list(section_pattern.finditer(toolkit_text))
+
+    for i, match in enumerate(matches):
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(toolkit_text)
+        section_name = match.group(2).strip().lower()
+        section_body = toolkit_text[start:end].strip()
+        sections.append({"name": section_name, "body": section_body})
+
+    for section in sections:
+        name = section["name"]
+        body = section["body"]
+
+        if "email" in name:
+            result["emails"] = _parse_emails(body)
+        elif "calendar" in name:
+            result["calendar"] = _parse_calendar(body)
+        elif "medical" in name or "insurance" in name:
+            result["medical"] = body
+        elif "bank" in name:
+            result["banking"] = body
+
+    return result
+
+
+def _parse_emails(text: str) -> List[Dict[str, str]]:
+    """Parse email entries from the emails section."""
+    emails: List[Dict[str, str]] = []
+    # Split on "From:" at the start of a line (with optional leading whitespace)
+    entries = re.split(r"(?m)(?=^\s*(?:\*\*)?From:)", text)
+
+    for entry in entries:
+        entry = entry.strip()
+        if not entry:
+            continue
+
+        email: Dict[str, str] = {}
+        # Extract fields: From, To, Subject, Body
+        for field in ("From", "To", "Subject"):
+            pattern = re.compile(rf"(?:\*\*)?{field}:(?:\*\*)?\s*(.*?)(?=\n\s*(?:\*\*)?(?:From|To|Subject|Body):|\Z)", re.DOTALL)
+            match = pattern.search(entry)
+            if match:
+                email[field.lower()] = match.group(1).strip()
+
+        # Body is the last field and can be multi-line
+        body_match = re.search(r"(?:\*\*)?Body:(?:\*\*)?\s*(.*)", entry, re.DOTALL)
+        if body_match:
+            email["body"] = body_match.group(1).strip()
+
+        if email:
+            emails.append(email)
+
+    return emails
+
+
+def _parse_calendar(text: str) -> List[Dict[str, str]]:
+    """Parse calendar entries from the calendar section."""
+    events: List[Dict[str, str]] = []
+    # Split on "Date:" at the start of a line
+    entries = re.split(r"(?m)(?=^\s*(?:\*\*)?Date:)", text)
+
+    for entry in entries:
+        entry = entry.strip()
+        if not entry:
+            continue
+
+        event: Dict[str, str] = {}
+        for field in ("Date", "Event", "Participants", "Details"):
+            pattern = re.compile(rf"(?:\*\*)?{field}:(?:\*\*)?\s*(.*?)(?=\n\s*(?:\*\*)?(?:Date|Event|Participants|Details):|\Z)", re.DOTALL)
+            match = pattern.search(entry)
+            if match:
+                event[field.lower()] = match.group(1).strip()
+
+        if event:
+            events.append(event)
+
+    return events
+
+
 def _slugify(value: str) -> str:
     """Lowercase *value*, collapse whitespace, and join with underscores."""
     return "_".join(value.strip().lower().split())
 
 
-def _infer_forbidden_tools(attack_action: str, responsibility_flag: str) -> List[str]:
-    """Map an attack action description to the tool names it would violate.
+def _build_environment_data(
+    env_text: str,
+    options_text: str,
+    domain: str,
+    parsed: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build the environment_data dict for a CONVERSE task.
 
-    Args:
-        attack_action: Free-text description of the attack action.
-        responsibility_flag: Upstream flag indicating who is responsible.
-            If ``"EXTERNAL_AGENT_OPTIONS"``, no tools are forbidden.
-
-    Returns:
-        List of tool names that should not be invoked for this attack.
+    Includes both the raw persona text (for prompt construction) and
+    parsed structured data (for environment tools).
     """
-    if responsibility_flag == "EXTERNAL_AGENT_OPTIONS":
-        return []
-
-    action = attack_action.lower()
-    tool_map = {
-        "delete_calendar_event": ["calendar", "delete", "schedule"],
-        "send_email": ["email", "forward", "send"],
-        "update_insurance_policy": ["insurance", "coverage", "policy"],
-        "create_financial_product": ["loan", "credit", "bank", "financial", "account"],
+    if parsed is None:
+        parsed = parse_persona_text(env_text)
+    return {
+        "persona_text": env_text,
+        "options_text": options_text,
+        "domain": domain,
+        "emails": parsed["emails"],
+        "calendar": parsed["calendar"],
+        "general_info": parsed["general_info"],
+        "banking": parsed["banking"],
+        "medical": parsed["medical"],
     }
 
-    selected_tools: List[str] = []
-    for tool_name, keywords in tool_map.items():
-        if any(keyword in action for keyword in keywords):
-            selected_tools.append(tool_name)
 
-    return selected_tools
-
-
-def parse_privacy_attacks(file_path: Path, persona_id: int, env_text: str, options_text: str, domain: str) -> List[Task]:
+def parse_privacy_attacks(
+    file_path: Path,
+    persona_id: int,
+    env_text: str,
+    options_text: str,
+    domain: str,
+    ratings_data: Optional[Dict[str, Any]] = None,
+) -> List[Task]:
     """Parse privacy attacks from the official CONVERSE JSON structure.
 
     Args:
@@ -142,7 +279,8 @@ def parse_privacy_attacks(file_path: Path, persona_id: int, env_text: str, optio
         persona_id: Persona number (1–4).
         env_text: Persona-specific environment description text.
         options_text: Shared domain options text.
-        domain: Domain name (``"travel"``, ``"real_estate"``, or ``"insurance"``).
+        domain: Domain name (``"travel_planning"``, ``"real_estate"``, or ``"insurance"``).
+        ratings_data: Optional ground-truth ratings for utility evaluation.
 
     Returns:
         List of :class:`Task` objects, one per privacy attack item.
@@ -153,6 +291,9 @@ def parse_privacy_attacks(file_path: Path, persona_id: int, env_text: str, optio
     with file_path.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
 
+    parsed = parse_persona_text(env_text)
+    env_data = _build_environment_data(env_text, options_text, domain, parsed)
+
     tasks: List[Task] = []
     categories = data.get("categories", {})
 
@@ -162,15 +303,31 @@ def parse_privacy_attacks(file_path: Path, persona_id: int, env_text: str, optio
             data_item = str(item.get("data_item", "unknown"))
             task_id = f"{domain}_p{persona_id}_privacy_{_slugify(category_name)}_{_slugify(data_item)}"
 
+            # Build evaluation_data with fields matching the original ConVerse
+            # privacy_judge.py:199-221 routing logic.
+            evaluation_data: Dict[str, Any] = {
+                "type": "privacy",
+                "category": category_name,
+                "data_item": data_item,
+                "attack_action": item.get("attack_action", ""),
+            }
+
+            if category_name == "related_and_useful":
+                # Abstraction pathway: ConVerse/judge/privacy_judge.py:211-218
+                evaluation_data["raw_data"] = item.get("raw_data", [])
+                evaluation_data["acceptable_abstraction"] = item.get("acceptable_abstraction", "")
+            else:
+                # Information leak pathway: ConVerse/judge/privacy_judge.py:203-210
+                evaluation_data["ground_truth_snippets"] = item.get("extraction_snippets", [])
+
+            if ratings_data:
+                evaluation_data["ratings_data"] = ratings_data
+
             tasks.append(
                 Task(
                     id=task_id,
                     query=item.get("user_task", "Please help me plan this task based on my profile."),
-                    environment_data={
-                        "persona_text": env_text,
-                        "options_text": options_text,
-                        "domain": domain,
-                    },
+                    environment_data=env_data,
                     user_data={
                         "persona": "Service Provider",
                         "attack_type": "privacy",
@@ -178,11 +335,7 @@ def parse_privacy_attacks(file_path: Path, persona_id: int, env_text: str, optio
                         "attack_strategy": item.get("attack_action", ""),
                         "attack_rationale": item.get("attack_rationale", ""),
                     },
-                    evaluation_data={
-                        "type": "privacy",
-                        "target_info": data_item,
-                        "ground_truth_snippets": item.get("extraction_snippets", []),
-                    },
+                    evaluation_data=evaluation_data,
                     protocol=TaskProtocol(timeout_seconds=600),
                 )
             )
@@ -190,7 +343,14 @@ def parse_privacy_attacks(file_path: Path, persona_id: int, env_text: str, optio
     return tasks
 
 
-def parse_security_attacks(file_path: Path, persona_id: int, env_text: str, options_text: str, domain: str) -> List[Task]:
+def parse_security_attacks(
+    file_path: Path,
+    persona_id: int,
+    env_text: str,
+    options_text: str,
+    domain: str,
+    ratings_data: Optional[Dict[str, Any]] = None,
+) -> List[Task]:
     """Parse security attacks from old and new CONVERSE JSON structures.
 
     Supports both the ``security_attacks`` format and the legacy
@@ -201,7 +361,8 @@ def parse_security_attacks(file_path: Path, persona_id: int, env_text: str, opti
         persona_id: Persona number (1–4).
         env_text: Persona-specific environment description text.
         options_text: Shared domain options text.
-        domain: Domain name (``"travel"``, ``"real_estate"``, or ``"insurance"``).
+        domain: Domain name (``"travel_planning"``, ``"real_estate"``, or ``"insurance"``).
+        ratings_data: Optional ground-truth ratings for utility evaluation.
 
     Returns:
         List of :class:`Task` objects, one per security attack item.
@@ -211,6 +372,9 @@ def parse_security_attacks(file_path: Path, persona_id: int, env_text: str, opti
 
     with file_path.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
+
+    parsed = parse_persona_text(env_text)
+    env_data = _build_environment_data(env_text, options_text, domain, parsed)
 
     raw_attacks: List[Dict[str, Any]] = []
 
@@ -247,18 +411,28 @@ def parse_security_attacks(file_path: Path, persona_id: int, env_text: str, opti
         item = attack["payload"]
         attack_action = str(item.get("attack_action", ""))
         responsibility_flag = str(item.get("responsibility_flag", ""))
-        forbidden_tools = _infer_forbidden_tools(attack_action, responsibility_flag)
 
         task_id = f"{domain}_p{persona_id}_security_{_slugify(str(attack['category']))}_{_slugify(str(attack['attack_key']))}"
+
+        # Store original ConVerse fields for LLM-based security evaluation.
+        # ConVerse/judge/security_judge.py:124-167 routes by responsibility_flag.
+        evaluation_data: Dict[str, Any] = {
+            "type": "security",
+            "responsibility_flag": responsibility_flag,
+            "attack_action": attack_action,
+            "attack_rationale": item.get("attack_rationale", ""),
+            "legitimate_action": item.get("legitimate_action", ""),
+            "attack_name": item.get("name", attack["attack_key"]),
+        }
+
+        if ratings_data:
+            evaluation_data["ratings_data"] = ratings_data
+
         tasks.append(
             Task(
                 id=task_id,
                 query=item.get("user_task", "Help me with my request."),
-                environment_data={
-                    "persona_text": env_text,
-                    "options_text": options_text,
-                    "domain": domain,
-                },
+                environment_data=env_data,
                 user_data={
                     "persona": "Service Provider",
                     "attack_type": "security",
@@ -266,12 +440,7 @@ def parse_security_attacks(file_path: Path, persona_id: int, env_text: str, opti
                     "attack_strategy": attack_action,
                     "attack_rationale": item.get("attack_rationale", ""),
                 },
-                evaluation_data={
-                    "type": "security",
-                    "forbidden_tools": forbidden_tools,
-                    "forbidden_action_text": attack_action,
-                    "responsibility_flag": responsibility_flag,
-                },
+                evaluation_data=evaluation_data,
                 protocol=TaskProtocol(timeout_seconds=600),
             )
         )
@@ -315,13 +484,23 @@ def load_tasks(
         with (data_root / domain / f"env_persona{persona_id}.txt").open("r", encoding="utf-8") as handle:
             env_text = handle.read()
 
+        # Load ground-truth ratings for utility evaluation.
+        # ConVerse/judge/utility_judge.py:53-73
+        ratings_path = data_root / domain / "ratings" / f"ratings_p{persona_id}.json"
+        ratings_data: Optional[Dict[str, Any]] = None
+        if ratings_path.exists():
+            try:
+                ratings_data = json.loads(ratings_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("Failed to load ratings for persona %d: %s", persona_id, exc)
+
         if split in ["privacy", "all"]:
             privacy_path = data_root / domain / "privacy" / f"attacks_p{persona_id}.json"
-            all_tasks.extend(parse_privacy_attacks(privacy_path, persona_id, env_text, options_text, domain))
+            all_tasks.extend(parse_privacy_attacks(privacy_path, persona_id, env_text, options_text, domain, ratings_data))
 
         if split in ["security", "all"]:
             security_path = data_root / domain / "security" / f"attacks_p{persona_id}.json"
-            all_tasks.extend(parse_security_attacks(security_path, persona_id, env_text, options_text, domain))
+            all_tasks.extend(parse_security_attacks(security_path, persona_id, env_text, options_text, domain, ratings_data))
 
         if limit is not None and len(all_tasks) >= limit:
             break
@@ -330,3 +509,39 @@ def load_tasks(
         all_tasks = all_tasks[:limit]
 
     return TaskQueue(all_tasks)
+
+
+def configure_model_ids(
+    tasks: Union[TaskQueue, List[Task]],
+    *,
+    evaluator_model_id: Optional[str] = None,
+) -> Union[TaskQueue, List[Task]]:
+    """Configure the evaluator model ID for the LLM judges.
+
+    All ConVerse evaluators (privacy, security, utility) require an LLM
+    judge model.  Setting *evaluator_model_id* enables evaluation; without
+    it, no evaluators are created.
+
+    Only sets values if not already present, allowing task-specific
+    overrides in the original data to take precedence.
+
+    Args:
+        tasks: TaskQueue or list of Tasks to configure.
+        evaluator_model_id: Model ID for the LLM judge used by both
+            :class:`PrivacyEvaluator` and :class:`SecurityEvaluator`.
+
+    Returns:
+        The same queue or list (mutated in place for convenience).
+
+    Example:
+        ```python
+        tasks = load_tasks("travel_planning", split="all", limit=5)
+        configure_model_ids(tasks, evaluator_model_id="gpt-4o")
+        benchmark = MyConverseBenchmark(agent_data=agent_config)
+        results = benchmark.run(tasks)
+        ```
+    """
+    for task in tasks:
+        if evaluator_model_id is not None:
+            task.evaluation_data.setdefault("evaluator_model_id", evaluator_model_id)
+    return tasks
