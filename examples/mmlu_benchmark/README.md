@@ -43,7 +43,13 @@ The benchmark expects a JSON file in the `mmlu_prompts_examples.json` format:
 
 ### Basic Evaluation
 
-Evaluate a model on all MMLU tasks:
+Evaluate a model on all MMLU tasks (uses `arubique/flattened-MMLU` by default):
+
+```bash
+python mmlu_benchmark.py --model_id "meta-llama/Llama-2-7b-hf"
+```
+
+To use a local JSON file or another Hugging Face dataset:
 
 ```bash
 python mmlu_benchmark.py \
@@ -137,7 +143,7 @@ python mmlu_benchmark.py \
 | Argument | Description | Default |
 |----------|-------------|---------|
 | `--model_id` | HuggingFace model identifier (required) | - |
-| `--data_path` | Path to MMLU prompts JSON file (required) | - |
+| `--data_path` | Path to MMLU prompts JSON file or Hugging Face dataset repo id | `arubique/flattened-MMLU` |
 | `--anchor_points_path` | Path to anchor points pickle file | None |
 | `--output_dir` | Directory to save results | `./results` |
 | `--predictions_path` | Path to save predictions pickle (for DISCO) | None |

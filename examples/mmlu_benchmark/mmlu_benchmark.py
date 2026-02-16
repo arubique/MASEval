@@ -14,29 +14,27 @@ Equivalent to the disco-public command:
         --use_full_prompt
 
 Usage:
-    # Run with default settings (evaluates on all tasks)
-    python mmlu_benchmark.py --model_id "meta-llama/Llama-2-7b-hf" --data_path /path/to/mmlu_prompts_examples.json
+    # Run with default settings (evaluates on all tasks; uses arubique/flattened-MMLU by default)
+    python mmlu_benchmark.py --model_id "meta-llama/Llama-2-7b-hf"
 
     # Run with anchor points filtering (for DISCO prediction)
     python mmlu_benchmark.py \\
         --model_id "alignment-handbook/zephyr-7b-sft-full" \\
-        --data_path /path/to/mmlu_prompts_examples.json \\
         --anchor_points_path /path/to/anchor_points_disagreement.pkl
 
     # Run with DISCO prediction (passing --disco_model_path enables it)
     python mmlu_benchmark.py \\
         --model_id "alignment-handbook/zephyr-7b-sft-full" \\
-        --data_path /path/to/mmlu_prompts_examples.json \\
         --anchor_points_path /path/to/anchor_points_disagreement.pkl \\
         --disco_model_path /path/to/fitted_weights.pkl \\
         --disco_transform_path /path/to/transform.pkl \\
         --pca 256
 
     # Run on a subset of tasks for testing
-    python mmlu_benchmark.py \\
-        --model_id "meta-llama/Llama-2-7b-hf" \\
-        --data_path /path/to/mmlu_prompts_examples.json \\
-        --limit 10
+    python mmlu_benchmark.py --model_id "meta-llama/Llama-2-7b-hf" --limit 10
+
+    # Override data source (path to JSON or Hugging Face repo id)
+    python mmlu_benchmark.py --model_id "meta-llama/Llama-2-7b-hf" --data_path /path/to/mmlu_prompts_examples.json
 """
 
 import argparse
@@ -90,7 +88,7 @@ def parse_args():
     parser.add_argument(
         "--data_path",
         type=str,
-        required=True,
+        default="arubique/flattened-MMLU",
         help="Path to MMLU prompts JSON file, or Hugging Face dataset repo id (e.g. username/mmlu-prompts-examples)",
     )
 
