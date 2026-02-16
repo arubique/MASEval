@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Benchmarks**
 
+- MMLU Benchmark with DISCO support: Integration for evaluating language models on MMLU (Massive Multitask Language Understanding) multiple-choice questions, compatible with DISCO anchor-point methodology. Includes `MMLUBenchmark`, `HuggingFaceMMLUBenchmark`, `MMLUEnvironment`, `MMLUEvaluator`, `MMLUModelAgent`, `MMLUAgentAdapter`, `AnchorPointsTaskQueue`, `load_tasks()`, and `compute_benchmark_metrics()`. Optional extras: `lm-eval` (for `HuggingFaceMMLUBenchmark.precompute_all_logprobs_lmeval`), `disco` (for DISCO prediction in the example). (PR: #34)
+
 - CONVERSE benchmark for contextual safety evaluation in adversarial agent-to-agent conversations, including `ConverseBenchmark`, `DefaultAgentConverseBenchmark`, `ConverseEnvironment`, `ConverseExternalAgent`, `PrivacyEvaluator`, `SecurityEvaluator`, and `load_tasks()` utilities for `travel`, `real_estate`, and `insurance` domains. Benchmark source files are now downloaded on first use via `ensure_data_exists()` instead of being bundled in the package. (PR: #28)
 
 - GAIA2 Benchmark: Integration with Meta's ARE (Agent Research Environments) platform for evaluating LLM-based agents on dynamic, multi-step scenarios (PR: #26)
@@ -32,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Examples**
 
+- MMLU benchmark example at `examples/mmlu_benchmark/` for evaluating HuggingFace models on MMLU with optional DISCO prediction (`--disco_model_path`, `--disco_transform_path`). Supports local data, HuggingFace dataset repos, and DISCO weights from .pkl/.npz or HF repos. (PR: #34)
 - Added a dedicated runnable CONVERSE default benchmark example at `examples/converse_benchmark/default_converse_benchmark.py` for quick start with `DefaultAgentConverseBenchmark`. (PR: #28)
 - Gaia2 benchmark example with Google GenAI and OpenAI model support (PR: #26)
 
@@ -62,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Live API round-trip tests for all model adapters (`-m credentialed`) (PR: #29)
 - CI jobs for slow tests (with benchmark data caching) and credentialed tests (behind GitHub Environment approval) (PR: #29)
 - Added `respx` dev dependency for HTTP-level mocking (PR: #29)
+- pytest marker `mmlu` for tests that require the MMLU benchmark (HuggingFace + DISCO). (PR: #34)
 
 ### Changed
 
