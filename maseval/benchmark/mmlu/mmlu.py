@@ -33,7 +33,7 @@ import json
 import pickle
 from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union, cast
 
 # numpy is optional - only needed for anchor points processing
 try:
@@ -49,8 +49,11 @@ from maseval import (
     Benchmark,
     Environment,
     Evaluator,
+    MessageHistory,
     ModelAdapter,
     Task,
+    User,
+    SeedGenerator,
 )
 from maseval.core.task import AdaptiveTaskQueue, SequentialTaskQueue
 from maseval.core.tracing import TraceableMixin
@@ -402,15 +405,12 @@ class MMLUAgentAdapter(AgentAdapter):
         """Execute the agent."""
         return self.agent.run(query)
 
-    def get_messages(self) -> List[Dict[str, Any]]:
+    def get_messages(self) -> MessageHistory:
         """Get agent messages."""
-        return self.agent._messages
+        return MessageHistory(self.agent._messages)
 
     def gather_traces(self) -> Dict[str, Any]:
-        """Gather execution traces from this agent.
-
-        Override to handle plain list messages (not MessageHistory).
-        """
+        """Gather execution traces from this agent."""
         from maseval.core.tracing import TraceableMixin
 
         messages = self.get_messages()
@@ -419,7 +419,7 @@ class MMLUAgentAdapter(AgentAdapter):
             "name": self.name,
             "agent_type": type(self.agent).__name__,
             "message_count": len(messages),
-            "messages": messages,  # Already a list, no need for to_list()
+            "messages": messages.to_list(),
             "callbacks": [type(cb).__name__ for cb in self.callbacks],
             "logs": self.logs,
         }
@@ -473,7 +473,7 @@ class MMLUBenchmark(Benchmark):
         self,
         agent_data: Dict[str, Any],
         task: Task,
-        **kwargs: Any,
+        seed_generator: SeedGenerator,
     ) -> MMLUEnvironment:
         """Create environment for a task."""
         task_data = {
@@ -488,20 +488,20 @@ class MMLUBenchmark(Benchmark):
     def setup_user(
         self,
         agent_data: Dict[str, Any],
-        environment: MMLUEnvironment,
+        environment: Environment,
         task: Task,
-        **kwargs: Any,
-    ) -> None:
+        seed_generator: SeedGenerator,
+    ) -> Optional[User]:
         """MMLU doesn't use a user simulator."""
         return None
 
     def setup_agents(
         self,
         agent_data: Dict[str, Any],
-        environment: MMLUEnvironment,
+        environment: Environment,
         task: Task,
-        user: Optional[Any],
-        **kwargs: Any,
+        user: Optional[User],
+        seed_generator: SeedGenerator,
     ) -> Tuple[Sequence[AgentAdapter], Dict[str, AgentAdapter]]:
         """Create model agent for MCQ evaluation.
 
@@ -524,11 +524,11 @@ class MMLUBenchmark(Benchmark):
 
     def setup_evaluators(
         self,
-        environment: MMLUEnvironment,
+        environment: Environment,
         task: Task,
         agents: Sequence[AgentAdapter],
-        user: Optional[Any],
-        **kwargs: Any,
+        user: Optional[User],
+        seed_generator: SeedGenerator,
     ) -> Sequence[Evaluator]:
         """Create MMLU evaluator."""
         return [MMLUEvaluator(task, environment)]
@@ -537,12 +537,12 @@ class MMLUBenchmark(Benchmark):
         self,
         agents: Sequence[AgentAdapter],
         task: Task,
-        environment: MMLUEnvironment,
-        query: str = "",
+        environment: Environment,
+        query: str,
     ) -> Any:
         """Execute agent on the MMLU prompt."""
-        # Get the prompt from environment
-        prompt = environment.get_prompt()
+        mmlu_env = cast(MMLUEnvironment, environment)
+        prompt = mmlu_env.get_prompt()
 
         # Run the agent
         agent = agents[0]
@@ -649,7 +649,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
 
         return self._model, self._tokenizer
 
-    def _get_choice_token_id_separate(self, choice: str) -> int:
+    def _get_choice_token_id_separate(self, choice: str) -> Optional[int]:
         """Get the token ID for a choice when tokenized SEPARATELY.
 
         CRITICAL: lm-evaluation-harness encodes context and continuation separately,
@@ -662,7 +662,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
             choice: The choice string (e.g., "A").
 
         Returns:
-            Token ID for the choice (standalone tokenization).
+            Token ID for the choice (standalone tokenization), or None if multi-token.
         """
         _, tokenizer = self._load_model()
 
