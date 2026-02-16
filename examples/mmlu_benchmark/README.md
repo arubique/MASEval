@@ -1,6 +1,6 @@
 # MMLU Benchmark Example
 
-Evaluate language models on MMLU (Massive Multitask Language Understanding) with optional efficient evaluation via DISCO.
+Evaluate language models on [MMLU (Massive Multitask Language Understanding)](https://arxiv.org/abs/2009.03300) with optional efficient evaluation via [DISCO](https://arxiv.org/abs/2510.07959).
 
 ## Run without DISCO (full evaluation)
 
