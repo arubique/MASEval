@@ -56,4 +56,4 @@ DISCO Predicted Full Benchmark Accuracy:
 | `--disco_transform_path` | Path to DISCO PCA transform `.pkl` or `.npz` (for local DISCO model when using `--pca`) | — |
 | `--pca` | PCA dimension for DISCO embeddings | — |
 | `--pad_to_size` | Pad predictions to this size with -inf | — |
-| `--use_lmeval_batching` | Use lm-evaluation-harness-style batching for exact numerical match with DISCO repo | off |
+| `--use_lmeval_batching` | Use [lm-evaluation-harness-style](https://github.com/EleutherAI/lm-evaluation-harness) batching for exact numerical match with DISCO repo | off |
