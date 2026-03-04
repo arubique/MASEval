@@ -52,8 +52,7 @@ class RetailTools(ToolKitBase[RetailDB]):
         """Get the order from the database.
 
         Args:
-            order_id: The order id, such as '#W0000000' or 'W0000000'.
-                The '#' prefix is optional and will be added if missing.
+            order_id: The order id, such as '#W0000000'. Be careful there is a '#' symbol at the beginning of the order id.
 
         Returns:
             The order.
@@ -63,9 +62,6 @@ class RetailTools(ToolKitBase[RetailDB]):
         """
         if self.db is None:
             raise ValueError("Database not initialized")
-        # Normalize order_id: add '#' prefix if missing (LLMs often omit it)
-        if not order_id.startswith("#"):
-            order_id = f"#{order_id}"
         if order_id not in self.db.orders:
             raise ValueError("Order not found")
         return self.db.orders[order_id]
@@ -541,8 +537,7 @@ class RetailTools(ToolKitBase[RetailDB]):
         if len(item_ids) != len(new_item_ids):
             raise ValueError("The number of items to be exchanged should match")
 
-        diff_price = 0.0
-        variant = None
+        diff_price = 0
         for item_id, new_item_id in zip(item_ids, new_item_ids):
             if item_id == new_item_id:
                 raise ValueError("The new item id should be different from the old item id")
@@ -582,10 +577,9 @@ class RetailTools(ToolKitBase[RetailDB]):
             item = next((item for item in order.items if item.item_id == item_id), None)
             if item is None:
                 raise ValueError(f"Item {item_id} not found")
-            if variant is not None:
-                item.item_id = new_item_id
-                item.price = variant.price
-                item.options = variant.options
+            item.item_id = new_item_id
+            item.price = variant.price
+            item.options = variant.options
         order.status = "pending (item modified)"
 
         return order

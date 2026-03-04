@@ -138,7 +138,24 @@ class MACSGenericTool(TraceableMixin, ConfigurableMixin):
 
     @staticmethod
     def _schema_to_inputs(schema: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert JSON schema to inputs format."""
+        """Convert JSON Schema properties to a flat inputs dictionary.
+
+        Translates each property from the JSON Schema ``properties`` block
+        into a ``{type, description}`` dict. For array-type properties, the
+        ``items`` sub-schema is included so that downstream tool
+        registrations produce valid JSON Schema. The MACS-specific
+        ``data_type`` key is normalised to standard ``type``.
+
+        Args:
+            schema: JSON Schema object with a ``properties`` key.
+
+        Returns:
+            Dictionary mapping property names to ``{type, description}`` dicts.
+
+        Raises:
+            ValueError: If an array property is missing ``items`` or the items
+                spec has no ``type`` / ``data_type`` key.
+        """
         inputs = {}
         for k, prop in schema.get("properties", {}).items():
             dtype = prop.get("data_type") or prop.get("type", "string")
@@ -146,6 +163,25 @@ class MACSGenericTool(TraceableMixin, ConfigurableMixin):
                 "type": dtype if isinstance(dtype, str) else "string",
                 "description": prop.get("description", ""),
             }
+            # Preserve items schema for array types.
+            # The original MACS data uses "data_type" inside items; convert
+            # to standard JSON Schema "type" so LLM providers accept it.
+            if dtype == "array":
+                if "items" not in prop:
+                    raise ValueError(
+                        f"Array property '{k}' is missing 'items' in its schema. "
+                        f"Gemini and OpenAI require items for array types. "
+                        f"Full property spec: {prop}"
+                    )
+                items_spec = prop["items"]
+                item_type = items_spec.get("data_type") or items_spec.get("type")
+                if not item_type:
+                    raise ValueError(
+                        f"Array property '{k}' has 'items' but no 'data_type' or 'type' key. "
+                        f"Cannot determine element type. "
+                        f"Full items spec: {items_spec}"
+                    )
+                inputs[k]["items"] = {"type": item_type}
         return inputs
 
     def __call__(self, **kwargs: Any) -> str:
@@ -489,6 +525,7 @@ class MACSUser(LLMUser):
         max_turns: int = DEFAULT_MAX_TURNS,
         stop_tokens: Optional[List[str]] = None,
         early_stopping_condition: str = DEFAULT_EARLY_STOPPING_CONDITION,
+        exhausted_response: Optional[str] = None,
     ):
         """Initialize MACS user simulator.
 
@@ -502,6 +539,9 @@ class MACSUser(LLMUser):
             stop_tokens: Tokens indicating user satisfaction (default: ["</stop>"])
             early_stopping_condition: Description of when to emit stop token
                 (default: "ALL goals have been satisfactorily addressed by the assistant")
+            exhausted_response: Message to return when ``respond()`` is called
+                after the user is done. If ``None`` (default), raises
+                ``UserExhaustedError`` instead.
         """
         # Extract user profile from scenario text
         user_profile = self._extract_user_profile(scenario)
@@ -520,19 +560,20 @@ class MACSUser(LLMUser):
             max_turns=max_turns,
             stop_tokens=stop_tokens,
             early_stopping_condition=early_stopping_condition,
+            exhausted_response=exhausted_response,
         )
 
     def get_tool(self) -> Any:
-        """Return a tool for agent interaction.
+        """Return a tool that agents can invoke to interact with this user.
 
-        This base implementation raises NotImplementedError.
-        Framework-specific subclasses should override this method.
+        Subclasses must override this to wrap the user interaction logic in a
+        tool object compatible with their agentic framework.
 
-        For smolagents, use SmolAgentMACSUser which provides a smolagents-compatible tool.
-        For langgraph, use LangGraphMACSUser which provides a langchain-compatible tool.
+        Returns:
+            A tool instance for agent-user interaction.
 
         Raises:
-            NotImplementedError: Always, as this must be implemented by subclass.
+            NotImplementedError: Always; must be implemented by subclass.
         """
         raise NotImplementedError(
             "MACSUser.get_tool() must be overridden by framework-specific subclass. "
@@ -552,41 +593,24 @@ class MACSUser(LLMUser):
             self._turn_count = 0
 
     @staticmethod
-    def _extract_user_profile(scenario: str) -> Dict[str, Any]:
+    def _extract_user_profile(scenario: str) -> Dict[str, Any]:  # noqa: ARG004
         """Extract user profile from scenario text.
 
-        The MACS scenarios contain user background info after "Background:" marker.
+        The MACS scenario string already contains both Goals and Background
+        sections with clear labels. It is passed as the ``scenario`` argument
+        to UserLLMSimulator, which renders it in the prompt under
+        "### SCENARIO & GOALS". Rather than attempting to parse individual
+        fields (which is brittle — the data uses at least three different
+        formatting styles), we point the "### USER PROFILE" template section
+        at the scenario to avoid duplication and information loss.
 
         Args:
             scenario: Full scenario text with goals and background
 
         Returns:
-            Dict with user profile fields
+            Dict with a note referencing the scenario section.
         """
-        profile: Dict[str, Any] = {}
-
-        # Find the Background section
-        if "Background:" in scenario:
-            background_section = scenario.split("Background:")[-1].strip()
-
-            # Parse bullet points (* User's name is ...)
-            for line in background_section.split("\n"):
-                line = line.strip().lstrip("*").strip()
-                if line.lower().startswith("user"):
-                    # Try to extract key-value pairs
-                    if " is " in line.lower():
-                        key_part, value_part = line.split(" is ", 1)
-                        key = key_part.lower().replace("user's ", "").replace("user ", "").strip()
-                        profile[key] = value_part.strip().rstrip(".")
-                    elif " has " in line.lower():
-                        key_part, value_part = line.split(" has ", 1)
-                        key = key_part.lower().replace("user's ", "").replace("user ", "").strip()
-                        profile[key] = value_part.strip().rstrip(".")
-
-        # Include full scenario as fallback context
-        profile["full_scenario"] = scenario
-
-        return profile
+        return {"note": "See SCENARIO & GOALS section below for full user profile and goals."}
 
     def gather_traces(self) -> Dict[str, Any]:
         """Gather traces with MACS-specific information."""
@@ -977,7 +1001,14 @@ class MACSBenchmark(Benchmark):
         # Compute overall metrics per AWS paper
         overall_gsr = 1.0 if (user_result.get("gsr", 0.0) == 1.0 and system_result.get("gsr", 0.0) == 1.0) else 0.0
 
-        # Supervisor GSR: success if overall passes OR user-side passes
+        # Supervisor GSR: the MACS paper (arXiv:2412.05449) defines this as "goal success
+        # rate of supervisor agent WITHOUT dependence on sub-agent/tool behavior", with the
+        # scoring rule: supervisor_gsr=1 if overall_gsr=1 OR "supervisor is reliable".
+        # However, the paper provides no explicit formula for "supervisor is reliable" —
+        # it is left ambiguous. As a deliberate simplification, we use user_gsr as a proxy:
+        # the supervisor is considered reliable when user-facing goals are met, independent
+        # of whether system-side goals also passed. This is mathematically equivalent to
+        # supervisor_gsr = user_gsr (since overall_gsr=1 implies user_gsr=1).
         supervisor_gsr = 1.0 if (overall_gsr == 1.0 or user_result.get("gsr", 0.0) == 1.0) else 0.0
 
         # Overall partial GSR

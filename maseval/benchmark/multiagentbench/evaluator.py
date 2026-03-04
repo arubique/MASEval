@@ -1,6 +1,14 @@
 """MultiAgentBench evaluator implementation.
 
 This module provides evaluation metrics matching MARBLE's evaluation methodology.
+
+Original Repository: https://github.com/ulab-uiuc/MARBLE
+Fork Used: https://github.com/cemde/MARBLE (contains bug fixes for MASEval integration)
+Code License: MIT
+
+Citation:
+    Zhu, et al. (2025). MultiAgentBench: Evaluating the Collaboration and Competition
+    of LLM agents. arXiv:2503.01935.
 """
 
 import json
@@ -27,18 +35,24 @@ class MultiAgentBenchMetrics:
     Attributes:
         task_completion: Whether the task was completed
         token_consumption: Total tokens used
-        communication_score: Score for inter-agent communication (1-5), None if not evaluated
+        communication_score: Single communication score (base evaluator, 1-5 or None)
+        communication_scores: Per-iteration communication scores (MARBLE reproduction, 1-5 or -1)
+        planning_scores: Per-iteration planning scores (MARBLE reproduction, 1-5 or -1)
         task_evaluation: Domain-specific evaluation results
         agent_kpis: Per-agent key performance indicators
         total_milestones: Number of milestones achieved
+        code_quality: Code quality scores (coding domain only)
     """
 
     task_completion: bool = False
     token_consumption: int = 0
     communication_score: Optional[float] = None
+    communication_scores: List[int] = field(default_factory=list)
+    planning_scores: List[int] = field(default_factory=list)
     task_evaluation: Dict[str, Any] = field(default_factory=dict)
     agent_kpis: Dict[str, int] = field(default_factory=dict)
     total_milestones: int = 0
+    code_quality: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert metrics to dictionary."""
@@ -46,9 +60,76 @@ class MultiAgentBenchMetrics:
             "task_completion": self.task_completion,
             "token_consumption": self.token_consumption,
             "communication_score": self.communication_score,
+            "communication_scores": self.communication_scores,
+            "planning_scores": self.planning_scores,
             "task_evaluation": self.task_evaluation,
             "agent_kpis": self.agent_kpis,
             "total_milestones": self.total_milestones,
+            "code_quality": self.code_quality,
+        }
+
+
+class MarbleReproductionEvaluator(Evaluator):
+    """Thin evaluator for MARBLE reproduction mode.
+
+    All LLM-based evaluation happens in the coordination loop via MARBLE's
+    own ``Evaluator`` class (imported directly from the vendored package).
+    This class only reformats the pre-computed metrics from
+    ``final_answer["marble_evaluation"]`` into MASEval's evaluation result
+    format. It makes NO LLM calls.
+    """
+
+    def __init__(self, domain: str):
+        self.domain = domain.lower()
+
+    def filter_traces(self, traces: Dict[str, Any]) -> Dict[str, Any]:
+        """Pass through traces unchanged."""
+        return traces
+
+    def __call__(  # type: ignore[override]
+        self,
+        traces: Dict[str, Any],
+        final_answer: Any = None,
+    ) -> Dict[str, Any]:
+        """Reformat pre-computed MARBLE metrics into MASEval result format.
+
+        Args:
+            traces: Execution traces (not used — evaluation is pre-computed)
+            final_answer: Dict from coordination loop containing
+                ``marble_evaluation`` key with MARBLE's ``evaluator.metrics``
+                dict.
+
+        Returns:
+            Evaluation result dictionary with ``passed``, ``metrics``,
+            ``marble_raw_metrics``, and ``domain`` keys.
+        """
+        if not isinstance(final_answer, dict) or "marble_evaluation" not in final_answer:
+            raise ValueError(
+                f"MarbleReproductionEvaluator expects final_answer to be a dict with "
+                f"'marble_evaluation' key, got: {type(final_answer).__name__}"
+            )
+        marble_eval: Dict[str, Any] = final_answer["marble_evaluation"]
+
+        # Direct dict access — MARBLE's Evaluator.__init__ (evaluator.py:31-39)
+        # always initializes all keys. Using [] instead of .get() ensures we
+        # fail loudly if a key is unexpectedly missing.
+        metrics = MultiAgentBenchMetrics(
+            # MARBLE's metrics["task_completion"] is always [] (evaluator.update()
+            # is never called in any coordination mode). bool([]) == False.
+            task_completion=bool(marble_eval["task_completion"]),
+            communication_scores=marble_eval["communication_score"],
+            planning_scores=marble_eval["planning_score"],
+            task_evaluation=marble_eval["task_evaluation"],
+            agent_kpis=marble_eval["agent_kpis"],
+            total_milestones=marble_eval["total_milestones"],
+            code_quality=marble_eval["code_quality"],
+        )
+
+        return {
+            "passed": metrics.task_completion,
+            "metrics": metrics.to_dict(),
+            "marble_raw_metrics": marble_eval,
+            "domain": self.domain,
         }
 
 
@@ -112,20 +193,36 @@ class MultiAgentBenchEvaluator(Evaluator):
         return template_path.read_text()
 
     def _load_evaluation_prompts(self) -> Dict[str, Any]:
-        """Load evaluation prompts from template files."""
+        """Load evaluation prompts from MARBLE's evaluator_prompts.json.
+
+        Communication, research, and bargaining prompts are loaded from the
+        vendored ``evaluator_prompts.json`` to match MARBLE's exact prompts.
+        Coding, werewolf, and minecraft use local templates (MARBLE handles
+        these differently — coding prompt is hardcoded in evaluator.py:538-576,
+        werewolf/minecraft are not in the JSON).
+        """
+        # Load MARBLE's canonical prompts
+        prompts_path = Path(__file__).parent / "marble" / "marble" / "evaluator" / "evaluator_prompts.json"
+        with open(prompts_path, "r", encoding="utf-8") as f:
+            marble_prompts = json.load(f)
+
         return {
             "communication": {
-                "prompt": self._load_template("communication.txt"),
+                "prompt": marble_prompts["Graph"]["Communication"]["prompt"],
             },
             "research": {
                 "task_evaluation": {
-                    "prompt": self._load_template("research.txt"),
+                    "prompt": marble_prompts["research"]["task_evaluation"]["prompt"],
                 }
             },
             "bargaining": {
                 "task_evaluation": {
-                    "buyer_prompt": self._load_template("bargaining_buyer.txt"),
-                    "seller_prompt": self._load_template("bargaining_seller.txt"),
+                    # MARBLE evaluator.py:210 has buyer_prompt commented out (code
+                    # regression). The paper requires both prompts to compute
+                    # TS = (buyer_avg + seller_avg) / 2 * 20. Each prompt evaluates
+                    # a single role and returns {"role": {metrics}}.
+                    "seller_prompt": marble_prompts["world"]["task_evaluation"]["seller_prompt"],
+                    "buyer_prompt": marble_prompts["world"]["task_evaluation"]["buyer_prompt"],
                 }
             },
             "coding": {
@@ -163,11 +260,22 @@ class MultiAgentBenchEvaluator(Evaluator):
     def _extract_communications(self, traces: Dict[str, Any]) -> str:
         """Extract communication logs from traces.
 
+        Reads the ``communication_log`` key from each agent's trace dict.
+        This key is populated by ``MarbleAgentAdapter`` (which captures it
+        from ``BaseAgent.act()``'s return value) but is **not** automatically
+        populated by other agent adapters. When ``communication_log`` is
+        absent, ``communication_score`` will be ``None`` and this method
+        returns ``"No communications recorded."``.
+
+        To enable communication evaluation with custom agents, ensure each
+        adapter's ``gather_traces()`` returns a ``"communication_log"`` key
+        with entries of the form ``{"communication": str}``.
+
         Args:
-            traces: Execution traces
+            traces: Execution traces.
 
         Returns:
-            Formatted communication string
+            Formatted communication string.
         """
         communications: List[str] = []
 
@@ -249,7 +357,12 @@ class MultiAgentBenchEvaluator(Evaluator):
         elif self.domain == "coding":
             metrics.task_evaluation = self._evaluate_coding(task_desc, final_result)
         elif self.domain == "database":
-            metrics.task_evaluation = self._evaluate_database(task_desc, final_result)
+            # Extract root_causes from environment state if available.
+            # MARBLE engine.py:473-479 passes self.config.task["root_causes"].
+            env_state = traces.get("environment", {}).get("state", {})
+            task_config = env_state.get("task_config", {})
+            root_causes = task_config.get("root_causes") if isinstance(task_config, dict) else None
+            metrics.task_evaluation = self._evaluate_database(task_desc, final_result, root_causes=root_causes)
         elif self.domain == "werewolf":
             metrics.task_evaluation = self._evaluate_werewolf(task_desc, final_result)
         elif self.domain == "minecraft":
@@ -366,37 +479,130 @@ class MultiAgentBenchEvaluator(Evaluator):
         return total
 
     def _evaluate_communication(self, task: str, communications: str) -> float:
-        """Evaluate communication quality using LLM."""
-        prompt_template = self._evaluation_prompts["communication"]["prompt"]
-        prompt = prompt_template.format(task=task, communications=communications)
+        """Evaluate communication quality using LLM.
 
-        response = self.model_adapter.generate(prompt)
+        Generation params match MARBLE evaluator.py:80-88:
+        temperature=0.0, max_token_num=512.
+        """
+        prompt_template = self._evaluation_prompts["communication"]["prompt"]
+        # Use .replace() instead of .format() because MARBLE's Communication
+        # prompt contains literal {"rating": X} (single braces, unlike research/
+        # bargaining which use {{ double braces). This is a bug in MARBLE's
+        # evaluator_prompts.json that causes .format() to raise KeyError.
+        prompt = prompt_template.replace("{task}", task).replace("{communications}", communications)
+
+        # Params from evaluator.py:80-88
+        response = self.model_adapter.generate(
+            prompt,
+            generation_params={"temperature": 0.0, "max_tokens": 512},
+        )
         return self._parse_score(response)
 
     def _evaluate_research(self, task: str, result: str) -> Dict[str, Any]:
-        """Evaluate research task output."""
+        """Evaluate research task output.
+
+        Generation params match MARBLE evaluator.py:183-191:
+        temperature=0.0, max_token_num=512.
+        """
         prompt_template = self._evaluation_prompts["research"]["task_evaluation"]["prompt"]
         prompt = prompt_template.format(task=task, result=result)
 
-        response = self.model_adapter.generate(prompt)
+        # Params from evaluator.py:183-191
+        response = self.model_adapter.generate(
+            prompt,
+            generation_params={"temperature": 0.0, "max_tokens": 512},
+        )
         return self._parse_research_ratings(response)
 
     def _evaluate_bargaining(self, task: str, result: str) -> Dict[str, Any]:
-        """Evaluate bargaining/world simulation task output."""
-        # Evaluate both buyer and seller perspectives
-        buyer_prompt = self._evaluation_prompts["bargaining"]["task_evaluation"]["buyer_prompt"]
-        seller_prompt = self._evaluation_prompts["bargaining"]["task_evaluation"]["seller_prompt"]
+        """Evaluate bargaining task output using separate buyer and seller prompts.
 
-        buyer_response = self.model_adapter.generate(buyer_prompt.format(task=task, result=result))
-        seller_response = self.model_adapter.generate(seller_prompt.format(task=task, result=result))
+        The MARBLE paper computes Task Score from both buyer and seller evaluations:
+        ``TS = (buyer_avg + seller_avg) / 2 * 20``. Each prompt evaluates a single
+        role and returns ``{"role": {"metric": score}}``.
+
+        MARBLE evaluator.py:210 has the buyer_prompt commented out (code regression).
+        This restores both calls to match the paper's published methodology.
+
+        Generation params match evaluator.py:214-220: temperature=0.0,
+        max_token_num=512.
+        """
+        gen_params = {"temperature": 0.0, "max_tokens": 512}
+
+        seller_prompt = self._evaluation_prompts["bargaining"]["task_evaluation"]["seller_prompt"]
+        seller_response = self.model_adapter.generate(
+            seller_prompt.format(task=task, result=result),
+            generation_params=gen_params,
+        )
+        seller_ratings = self._parse_role_ratings(seller_response, "seller")
+
+        buyer_prompt = self._evaluation_prompts["bargaining"]["task_evaluation"]["buyer_prompt"]
+        buyer_response = self.model_adapter.generate(
+            buyer_prompt.format(task=task, result=result),
+            generation_params=gen_params,
+        )
+        buyer_ratings = self._parse_role_ratings(buyer_response, "buyer")
+
+        # Compute scores matching MARBLE paper methodology:
+        # Per-role score = mean of 3 metrics (1-5 scale) * 20 -> 0-100
+        buyer_score = sum(buyer_ratings.values()) / len(buyer_ratings) * 20
+        seller_score = sum(seller_ratings.values()) / len(seller_ratings) * 20
 
         return {
-            "buyer": self._parse_bargaining_ratings(buyer_response),
-            "seller": self._parse_bargaining_ratings(seller_response),
+            "buyer": buyer_ratings,
+            "seller": seller_ratings,
+            "buyer_score": buyer_score,
+            "seller_score": seller_score,
+            "mean_score": (buyer_score + seller_score) / 2,
+        }
+
+    def _parse_role_ratings(self, response: str, role: str) -> Dict[str, int]:
+        """Parse bargaining ratings for a single role from LLM response.
+
+        Each bargaining prompt (buyer or seller) returns a JSON object with
+        a single role key containing three metric scores on a 1-5 scale.
+
+        Args:
+            response: LLM response containing JSON like ``{"role": {"metric": score}}``.
+            role: Expected role key (``"buyer"`` or ``"seller"``).
+
+        Returns:
+            Dict with ``effectiveness_of_strategies``, ``progress_and_outcome``,
+            ``interaction_dynamics`` as int scores.
+
+        Raises:
+            ValueError: If the response cannot be parsed or the role key is missing.
+        """
+        content = response.strip()
+        json_start = content.find("{")
+        json_end = content.rfind("}") + 1
+
+        if json_start < 0 or json_end <= json_start:
+            raise ValueError(f"No JSON object found in evaluator response: {response!r}")
+
+        json_str = content[json_start:json_end]
+        ratings = json.loads(json_str)
+
+        # The response may be {"role": {metrics}} or just {metrics}
+        if role in ratings:
+            role_data = ratings[role]
+        elif "effectiveness_of_strategies" in ratings:
+            role_data = ratings
+        else:
+            raise ValueError(f"Expected '{role}' key or metric keys in response, got: {ratings!r}")
+
+        return {
+            "effectiveness_of_strategies": int(role_data["effectiveness_of_strategies"]),
+            "progress_and_outcome": int(role_data["progress_and_outcome"]),
+            "interaction_dynamics": int(role_data["interaction_dynamics"]),
         }
 
     def _evaluate_coding(self, task: str, result: str) -> Dict[str, Any]:
-        """Evaluate coding task output."""
+        """Evaluate coding task output.
+
+        Generation params match MARBLE evaluator.py:586-594:
+        temperature=0.0, max_token_num=4096.
+        """
         prompt_template = self._evaluation_prompts["coding"]["task_evaluation"]["prompt"]
 
         # For coding, we need requirements and solution separately
@@ -407,18 +613,30 @@ class MultiAgentBenchEvaluator(Evaluator):
             solution=result,
         )
 
-        response = self.model_adapter.generate(prompt)
+        # Params from evaluator.py:586-594 (coding uses 4096 tokens)
+        response = self.model_adapter.generate(
+            prompt,
+            generation_params={"temperature": 0.0, "max_tokens": 4096},
+        )
         return self._parse_coding_ratings(response)
 
-    def _evaluate_database(self, task: str, result: str) -> Dict[str, Any]:
+    def _evaluate_database(self, task: str, result: str, root_causes: Optional[List[str]] = None) -> Dict[str, Any]:
         """Evaluate database task output.
 
-        Database tasks have ground truth labels that would be compared
-        separately. Here we just store the prediction.
+        Matches MARBLE evaluator.py:284-300. Database evaluation stores the
+        predicted result alongside ground-truth root causes for offline
+        comparison (no LLM call).
+
+        Args:
+            task: Task description
+            result: Predicted root cause analysis
+            root_causes: Ground truth root cause labels from task config
+                (``task.environment_data["task"]["root_causes"]``)
         """
+        # Matching evaluator.py:297-300
         return {
+            "root_cause": root_causes if root_causes is not None else [],
             "predicted": result,
-            "root_cause": [],  # Would be filled from task data
         }
 
     def _evaluate_werewolf(self, task: str, result: str) -> Dict[str, Any]:
@@ -426,7 +644,10 @@ class MultiAgentBenchEvaluator(Evaluator):
         prompt_template = self._evaluation_prompts["werewolf"]["task_evaluation"]["prompt"]
         prompt = prompt_template.format(task=task, result=result)
 
-        response = self.model_adapter.generate(prompt)
+        response = self.model_adapter.generate(
+            prompt,
+            generation_params={"temperature": 0.0, "max_tokens": 512},
+        )
         return self._parse_werewolf_ratings(response)
 
     def _evaluate_minecraft(self, task: str, result: str) -> Dict[str, Any]:
@@ -439,7 +660,10 @@ class MultiAgentBenchEvaluator(Evaluator):
         prompt_template = self._evaluation_prompts["minecraft"]["task_evaluation"]["prompt"]
         prompt = prompt_template.format(task=task, result=result)
 
-        response = self.model_adapter.generate(prompt)
+        response = self.model_adapter.generate(
+            prompt,
+            generation_params={"temperature": 0.0, "max_tokens": 512},
+        )
         return self._parse_minecraft_ratings(response)
 
     def _parse_score(self, response: str) -> float:
@@ -497,27 +721,6 @@ class MultiAgentBenchEvaluator(Evaluator):
         json_str = content[json_start:json_end]
         ratings = json.loads(json_str)
         return {k: int(v) for k, v in ratings.items()}
-
-    def _parse_bargaining_ratings(self, response: str) -> Dict[str, int]:
-        """Parse bargaining evaluation ratings.
-
-        Raises:
-            ValueError: If the response cannot be parsed into valid ratings
-        """
-        content = response.strip()
-        json_start = content.find("{")
-        json_end = content.rfind("}") + 1
-
-        if json_start < 0 or json_end <= json_start:
-            raise ValueError(f"No JSON object found in evaluator response: {response!r}")
-
-        json_str = content[json_start:json_end]
-        ratings = json.loads(json_str)
-        return {
-            "effectiveness_of_strategies": int(ratings["effectiveness_of_strategies"]),
-            "progress_and_outcome": int(ratings["progress_and_outcome"]),
-            "interaction_dynamics": int(ratings["interaction_dynamics"]),
-        }
 
     def _parse_coding_ratings(self, response: str) -> Dict[str, int]:
         """Parse coding evaluation ratings.

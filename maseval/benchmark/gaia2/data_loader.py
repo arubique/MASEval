@@ -5,8 +5,14 @@ This module provides functions to:
 2. Convert scenarios to MASEval Task objects
 3. Configure model IDs and judge engine for benchmark components
 
-Reference Paper: "GAIA-2: A Controllable Multi-Turn Conversational Benchmark for Agents"
+Original Repository: https://github.com/facebookresearch/meta-agents-research-environments
+Code License: MIT
 Data: https://huggingface.co/datasets/meta-agents-research-environments/gaia2
+
+Citation:
+    Froger, R., Benhalloum, A., Rusakov, A., et al. (2026). Gaia2: Benchmarking LLM
+    Agents on Dynamic and Asynchronous Environments. ICLR 2026.
+    https://openreview.net/forum?id=9gw03JpKK4
 
 No side effects on import. Data download/processing must be explicitly called.
 """
@@ -292,8 +298,8 @@ def configure_model_ids(
     ARE's built-in defaults (``meta-llama/Meta-Llama-3.3-70B-Instruct`` via
     HuggingFace). Pass ``judge_engine_config`` to override the model/provider.
 
-    Note: Unlike Tau2, Gaia2 doesn't have a user simulator (interactions
-    happen through scheduled events), so there's no user_model_id.
+    Note: Gaia2 doesn't have a user simulator (interactions happen through
+    scheduled events), so there's no user_model_id.
 
     Args:
         tasks: TaskQueue or list of Tasks to configure.

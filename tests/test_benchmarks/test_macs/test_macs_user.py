@@ -31,7 +31,7 @@ class TestMACSUserInit:
         assert user.max_turns == 5
         assert user._turn_count == 1  # Initial query counts as first turn
         assert not user._stopped
-        assert "full_scenario" in user.user_profile
+        assert "note" in user.user_profile
 
     def test_macs_default_max_turns_is_five(self, macs_model, sample_scenario, initial_query):
         """MACS benchmark defaults to max_turns=5 per MACS paper.
@@ -99,52 +99,26 @@ class TestMACSUserInit:
 
 @pytest.mark.benchmark
 class TestUserProfileExtraction:
-    """Tests for _extract_user_profile static method."""
+    """Tests for _extract_user_profile static method.
 
-    def test_extract_profile_with_background(self, sample_scenario):
-        """Parses Background: section."""
+    _extract_user_profile now returns a reference note instead of parsing
+    individual fields, because the full scenario (Goals + Background) is
+    already rendered in its own prompt section. This avoids duplication and
+    the lossy parsing that missed many formatting variants in the data.
+    """
+
+    def test_extract_profile_returns_note(self, sample_scenario):
+        """Returns a dict with a note pointing to the scenario section."""
         profile = MACSUser._extract_user_profile(sample_scenario)
 
-        assert "full_scenario" in profile
-        assert profile["full_scenario"] == sample_scenario
-
-    def test_extract_profile_is_statements(self):
-        """Parses 'User's X is Y' statements."""
-        scenario = """Background:
-* User's name is Alice
-* User's age is 30
-* User's company is TechCorp"""
-
-        profile = MACSUser._extract_user_profile(scenario)
-
-        assert profile.get("name") == "Alice"
-        assert profile.get("age") == "30"
-        assert profile.get("company") == "TechCorp"
-
-    def test_extract_profile_has_statements(self):
-        """Parses 'User has X' statements."""
-        scenario = """Background:
-* User has a pet dog
-* User has premium membership"""
-
-        profile = MACSUser._extract_user_profile(scenario)
-
-        # These should be captured with some key
-        assert "full_scenario" in profile  # At minimum, full scenario is always there
+        assert "note" in profile
+        assert "SCENARIO" in profile["note"]
 
     def test_extract_profile_no_background(self, minimal_scenario):
-        """Handles missing Background section."""
+        """Handles missing Background section (same result)."""
         profile = MACSUser._extract_user_profile(minimal_scenario)
 
-        # Should still have full_scenario
-        assert profile["full_scenario"] == minimal_scenario
-
-    def test_extract_profile_includes_full_scenario(self, sample_scenario):
-        """Full scenario is always in profile."""
-        profile = MACSUser._extract_user_profile(sample_scenario)
-
-        assert "full_scenario" in profile
-        assert sample_scenario in profile["full_scenario"]
+        assert "note" in profile
 
 
 # =============================================================================
@@ -320,8 +294,10 @@ class TestResponseSimulation:
         assert "</stop>" not in response
         assert "Perfect, thanks!" in response
 
-    def test_respond_returns_empty_when_done(self, sample_scenario, initial_query):
-        """Returns empty string when is_done is True."""
+    def test_respond_raises_when_done(self, sample_scenario, initial_query):
+        """Raises UserExhaustedError when is_done is True."""
+        from maseval.core.exceptions import UserExhaustedError
+
         model = DummyModelAdapter(responses=['{"text": "Default response", "details": {}}'])
         user = MACSUser(
             model=model,
@@ -330,12 +306,13 @@ class TestResponseSimulation:
         )
         user._stopped = True  # Already done
 
-        response = user.respond("Any follow-up?")
+        with pytest.raises(UserExhaustedError):
+            user.respond("Any follow-up?")
 
-        assert response == ""
+    def test_respond_raises_at_max_turns(self, sample_scenario, initial_query):
+        """Raises UserExhaustedError when max turns reached."""
+        from maseval.core.exceptions import UserExhaustedError
 
-    def test_respond_returns_empty_at_max_turns(self, sample_scenario, initial_query):
-        """Returns empty string when max turns reached."""
         model = DummyModelAdapter(responses=['{"text": "Default response", "details": {}}'])
         user = MACSUser(
             model=model,
@@ -345,9 +322,22 @@ class TestResponseSimulation:
         )
         user._turn_count = 3  # At max
 
-        response = user.respond("One more question?")
+        with pytest.raises(UserExhaustedError):
+            user.respond("One more question?")
 
-        assert response == ""
+    def test_respond_returns_exhausted_response_when_done(self, sample_scenario, initial_query):
+        """Returns exhausted_response when is_done and exhausted_response is set."""
+        model = DummyModelAdapter(responses=['{"text": "Default response", "details": {}}'])
+        user = MACSUser(
+            model=model,
+            scenario=sample_scenario,
+            initial_query=initial_query,
+            exhausted_response="User is done.",
+        )
+        user._stopped = True  # Already done
+
+        response = user.respond("Any follow-up?")
+        assert response == "User is done."
 
     def test_respond_fallback_message(self, sample_scenario, initial_query):
         """Provides fallback when response is only stop token."""
@@ -483,6 +473,8 @@ class TestMACSUserIntegration:
 
     def test_max_turns_enforcement(self, sample_scenario, initial_query):
         """Test that max turns is enforced."""
+        from maseval.core.exceptions import UserExhaustedError
+
         model = DummyModelAdapter(responses=["Response"] * 10)
         user = MACSUser(
             model=model,
@@ -494,17 +486,17 @@ class TestMACSUserIntegration:
         # Replace the simulator with a mock that returns a controlled response
         user.simulator = MagicMock(return_value="Response")
 
-        # Simulate 3 turns
-        for i in range(3):
+        # initial_query counts as turn 1, so 2 more respond() calls reach max_turns=3
+        for i in range(2):
             user.respond(f"Question {i}")
 
-        # Should be done after 3 turns
+        # Should be done after 3 turns (1 initial + 2 responds)
         assert user.is_done()
         assert user._turn_count == 3
 
-        # Additional calls should return empty
-        response = user.respond("One more?")
-        assert response == ""
+        # Additional calls should raise UserExhaustedError
+        with pytest.raises(UserExhaustedError):
+            user.respond("One more?")
 
     def test_reset_allows_new_conversation(self, sample_scenario, initial_query):
         """Test that reset allows starting new conversation."""

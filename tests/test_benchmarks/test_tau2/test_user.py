@@ -11,39 +11,20 @@ def mock_model():
 
 
 @pytest.mark.benchmark
-def test_extract_user_profile():
-    """Test extracting persona and profile from scenario."""
-    scenario = "Persona: Angry Customer\n\nTask: Return item."
-
-    profile = Tau2User._extract_user_profile(scenario)
-
-    assert profile["persona"] == "Angry Customer"
-    assert profile["full_scenario"] == scenario
-
-
-@pytest.mark.benchmark
-def test_extract_user_profile_no_persona():
-    """Test extracting profile when no persona is present."""
-    scenario = "Just a task."
-
-    profile = Tau2User._extract_user_profile(scenario)
-
-    assert "persona" not in profile
-    assert profile["full_scenario"] == scenario
-
-
-@pytest.mark.benchmark
-def test_get_tool_raises(mock_model):
-    """Test that base Tau2User raises NotImplementedError for get_tool."""
+def test_init_basic(mock_model):
+    """Test basic Tau2User initialization."""
     user = Tau2User(model=mock_model, scenario="test", initial_query="hi")
 
-    with pytest.raises(NotImplementedError):
-        user.get_tool()
+    assert user.scenario == "test"
+    assert user.tools == {}
+    assert user.tool_definitions is None
+    assert user.llm_args == {}
+    assert user.max_turns == 50
 
 
 @pytest.mark.benchmark
 def test_init_passes_tools(mock_model):
-    """Test that tools are correctly passed to parent AgenticUser."""
+    """Test that tools are correctly stored."""
     tools = {"test_tool": lambda x: x}
 
     user = Tau2User(model=mock_model, scenario="test", initial_query="hi", tools=tools)
@@ -56,7 +37,6 @@ def test_user_has_initial_query(mock_model):
     """Test that user has initial query method."""
     user = Tau2User(model=mock_model, scenario="test", initial_query="Hello!")
 
-    # Check that get_initial_query method returns the query
     assert user.get_initial_query() == "Hello!"
 
 
@@ -67,31 +47,7 @@ def test_user_has_scenario(mock_model):
 
     user = Tau2User(model=mock_model, scenario=scenario, initial_query="hi")
 
-    # Check that scenario is accessible
-    assert hasattr(user, "scenario") or hasattr(user, "_scenario")
-
-
-@pytest.mark.benchmark
-def test_extract_profile_with_task():
-    """Test extracting profile with Task field."""
-    scenario = "Persona: Helpful Customer\n\nTask: Buy a new phone."
-
-    profile = Tau2User._extract_user_profile(scenario)
-
-    assert profile["persona"] == "Helpful Customer"
-    assert "full_scenario" in profile
-
-
-@pytest.mark.benchmark
-def test_user_profile_initialization(mock_model):
-    """Test that user profile is initialized correctly."""
-    scenario = "Persona: Test User\n\nTask: Test task."
-
-    user = Tau2User(model=mock_model, scenario=scenario, initial_query="hi")
-
-    # User profile should be extracted from scenario
-    assert user.user_profile is not None
-    assert isinstance(user.user_profile, dict)
+    assert user.scenario == scenario
 
 
 @pytest.mark.benchmark
@@ -110,53 +66,340 @@ def test_gather_traces(mock_model):
     traces = user.gather_traces()
 
     assert isinstance(traces, dict)
-    # Should have expected trace fields
     assert "type" in traces
     assert "messages" in traces
-    assert "message_count" in traces
+    assert "max_turns" in traces
+    assert "turns_used" in traces
+    assert "stopped_by_user" in traces
     assert traces["type"] == "Tau2User"
-    assert traces["message_count"] == 1
+    assert traces["turns_used"] == 0
+    assert traces["stopped_by_user"] is False
+
+
+@pytest.mark.benchmark
+def test_is_done_initially_false(mock_model):
+    """Test that user is not done initially."""
+    user = Tau2User(model=mock_model, scenario="test", initial_query="hi")
+
+    assert user.is_done() is False
+
+
+@pytest.mark.benchmark
+def test_inject_greeting(mock_model):
+    """Test that inject_greeting prepends an assistant message."""
+    user = Tau2User(model=mock_model, scenario="test", initial_query="hi")
+
+    user.inject_greeting("Hi! How can I help?")
+
+    assert len(user._messages) == 1
+    assert user._messages[0]["role"] == "assistant"
+    assert user._messages[0]["content"] == "Hi! How can I help?"
+
+
+@pytest.mark.benchmark
+def test_stop_tokens_exact_case(mock_model):
+    """Test that stop tokens use exact case matching."""
+    assert Tau2User.STOP == "###STOP###"
+    assert Tau2User.TRANSFER == "###TRANSFER###"
+    assert Tau2User.OUT_OF_SCOPE == "###OUT-OF-SCOPE###"
+
+
+@pytest.mark.benchmark
+def test_system_prompt_contains_scenario(mock_model):
+    """Test that system prompt includes scenario in <scenario> tags."""
+    user = Tau2User(model=mock_model, scenario="My test scenario", initial_query="hi")
+
+    assert "<scenario>" in user._system_prompt
+    assert "My test scenario" in user._system_prompt
+    assert "</scenario>" in user._system_prompt
+
+
+@pytest.mark.benchmark
+def test_guidelines_loaded_no_tools(mock_model):
+    """Test that simulation_guidelines.md is loaded when no tools."""
+    user = Tau2User(model=mock_model, scenario="test", initial_query="hi")
+
+    # Should load the no-tools guidelines
+    assert "User Simulation Guidelines" in user._system_prompt
+
+
+@pytest.mark.benchmark
+def test_guidelines_loaded_with_tools(mock_model):
+    """Test that simulation_guidelines_tools.md is loaded when tools provided."""
+    user = Tau2User(
+        model=mock_model,
+        scenario="test",
+        initial_query="hi",
+        tools={"my_tool": lambda: None},
+    )
+
+    # Should load the tools guidelines
+    assert "User Simulation Guidelines" in user._system_prompt
+
+
+@pytest.mark.benchmark
+def test_llm_args_passed(mock_model):
+    """Test that llm_args are stored."""
+    user = Tau2User(
+        model=mock_model,
+        scenario="test",
+        initial_query="hi",
+        llm_args={"temperature": 0.0},
+    )
+
+    assert user.llm_args == {"temperature": 0.0}
+
+
+@pytest.mark.benchmark
+def test_max_turns_custom(mock_model):
+    """Test custom max_turns."""
+    user = Tau2User(model=mock_model, scenario="test", initial_query="hi", max_turns=10)
+
+    assert user.max_turns == 10
 
 
 @pytest.mark.benchmark
 class TestTau2UserScenarios:
     """Tests for various Tau2User scenario handling."""
 
-    def test_multiline_persona(self, mock_model):
-        """Test extracting persona from multiline scenario."""
-        scenario = """Persona: Frustrated customer who has been waiting
-for a long time
+    def test_scenario_stored_as_is(self, mock_model):
+        """Test that scenario is stored verbatim."""
+        scenario = "Persona:\n\tFrustrated customer\nInstructions:\n\tGet a refund."
 
-Task: Get a refund."""
+        user = Tau2User(model=mock_model, scenario=scenario, initial_query="hi")
 
-        profile = Tau2User._extract_user_profile(scenario)
+        assert user.scenario == scenario
 
-        # Should capture the first line after Persona:
-        assert "Frustrated" in profile.get("persona", "")
+    def test_scenario_in_system_prompt(self, mock_model):
+        """Test scenario appears in system prompt."""
+        scenario = "Instructions:\n\tTest instructions here"
 
-    def test_scenario_with_context(self, mock_model):
-        """Test scenario with additional context."""
-        scenario = """Persona: Regular customer
+        user = Tau2User(model=mock_model, scenario=scenario, initial_query="hi")
 
-Context: Customer has been with the company for 5 years.
+        assert scenario in user._system_prompt
 
-Task: Upgrade their plan."""
 
-        profile = Tau2User._extract_user_profile(scenario)
+# =============================================================================
+# Tau2User.respond() Early Exit Tests — Lines 186-188
+# =============================================================================
 
-        assert profile["full_scenario"] == scenario
 
-    def test_complex_scenario(self, mock_model):
-        """Test complex real-world scenario."""
-        scenario = """Persona: Jane, a busy professional
+@pytest.mark.benchmark
+class TestTau2UserRespondEarlyExit:
+    """Tests for Tau2User.respond() early exit conditions."""
 
-Background: Jane is a software engineer at a startup. She travels frequently
-for work and needs reliable phone service.
+    def test_respond_after_stopped_raises(self, mock_model):
+        """respond() raises UserExhaustedError when already stopped."""
+        from maseval.core.exceptions import UserExhaustedError
 
-Task: Jane wants to enable international roaming on her line before
-her upcoming trip to Europe."""
+        user = Tau2User(model=mock_model, scenario="test", initial_query="hi")
+        user._stopped = True
+        with pytest.raises(UserExhaustedError):
+            user.respond("anything")
+        assert user._last_respond_steps == 0
 
-        profile = Tau2User._extract_user_profile(scenario)
+    def test_respond_over_max_turns_raises(self, mock_model):
+        """respond() raises UserExhaustedError when max_turns exceeded."""
+        from maseval.core.exceptions import UserExhaustedError
 
-        assert "Jane" in profile.get("persona", "")
-        assert profile["full_scenario"] == scenario
+        user = Tau2User(model=mock_model, scenario="test", initial_query="hi", max_turns=1)
+        user._turn_count = 2
+        with pytest.raises(UserExhaustedError):
+            user.respond("anything")
+        assert user._stopped is True
+
+    def test_respond_after_stopped_returns_exhausted_response(self, mock_model):
+        """respond() returns exhausted_response when stopped and configured."""
+        user = Tau2User(
+            model=mock_model,
+            scenario="test",
+            initial_query="hi",
+            exhausted_response="User done.",
+        )
+        user._stopped = True
+        result = user.respond("anything")
+        assert result == "User done."
+        assert user._last_respond_steps == 0
+
+
+# =============================================================================
+# Tau2User._generate_response() Tool Call Flow — Lines 229-250
+# =============================================================================
+
+
+@pytest.mark.benchmark
+class TestTau2UserToolCallFlow:
+    """Tests for Tau2User tool call execution in _generate_response()."""
+
+    def test_tool_call_executed_and_result_stored(self):
+        """Tool calls execute, results stored, then text generated."""
+        mock_model = MagicMock()
+        # First call returns tool call, second returns text
+        mock_model.chat.side_effect = [
+            MagicMock(content="", tool_calls=[{"id": "tc1", "function": {"name": "pay_bill", "arguments": '{"bill_id": "b1"}'}}]),
+            MagicMock(content="Payment done", tool_calls=[]),
+        ]
+        user = Tau2User(
+            model=mock_model,
+            scenario="test",
+            initial_query="pay",
+            tools={"pay_bill": lambda bill_id: "paid"},
+            tool_definitions=[{"type": "function", "function": {"name": "pay_bill"}}],
+        )
+        result = user.respond("How can I help?")
+        assert result == "Payment done"
+        # Verify tool call and result in messages
+        has_tc = any(m.get("tool_calls") for m in user._messages)
+        has_tool_result = any(m.get("role") == "tool" for m in user._messages)
+        assert has_tc
+        assert has_tool_result
+
+    def test_stop_token_sets_stopped(self):
+        """Stop token in response sets _stopped flag."""
+        mock_model = MagicMock()
+        mock_model.chat.return_value = MagicMock(content="###STOP###", tool_calls=[])
+        user = Tau2User(model=mock_model, scenario="test", initial_query="hi")
+        user.respond("Hello")
+        assert user.is_done()
+        assert user._stopped
+
+    def test_transfer_token_sets_stopped(self):
+        """Transfer token in response sets _stopped flag."""
+        mock_model = MagicMock()
+        mock_model.chat.return_value = MagicMock(content="###TRANSFER###", tool_calls=[])
+        user = Tau2User(model=mock_model, scenario="test", initial_query="hi")
+        user.respond("Hello")
+        assert user.is_done()
+
+    def test_out_of_scope_token_sets_stopped(self):
+        """Out-of-scope token in response sets _stopped flag."""
+        mock_model = MagicMock()
+        mock_model.chat.return_value = MagicMock(content="###OUT-OF-SCOPE###", tool_calls=[])
+        user = Tau2User(model=mock_model, scenario="test", initial_query="hi")
+        user.respond("Hello")
+        assert user.is_done()
+
+    def test_tool_not_found_returns_error(self):
+        """Tool not found in tools dict returns error message."""
+        mock_model = MagicMock()
+        mock_model.chat.side_effect = [
+            MagicMock(content="", tool_calls=[{"id": "tc1", "function": {"name": "missing_tool", "arguments": "{}"}}]),
+            MagicMock(content="ok", tool_calls=[]),
+        ]
+        user = Tau2User(
+            model=mock_model,
+            scenario="test",
+            initial_query="hi",
+            tools={"other_tool": lambda: None},
+            tool_definitions=[{"type": "function", "function": {"name": "missing_tool"}}],
+        )
+        user.respond("go")
+        # Should not crash; tool result should contain error
+        tool_msgs = [m for m in user._messages if m.get("role") == "tool"]
+        assert any("Error" in m.get("content", "") for m in tool_msgs)
+
+    def test_tool_execution_error_captured(self):
+        """Tool execution exception captured as error message."""
+        mock_model = MagicMock()
+        mock_model.chat.side_effect = [
+            MagicMock(content="", tool_calls=[{"id": "tc1", "function": {"name": "bad_tool", "arguments": "{}"}}]),
+            MagicMock(content="ok", tool_calls=[]),
+        ]
+
+        def bad_tool():
+            raise RuntimeError("tool broke")
+
+        user = Tau2User(
+            model=mock_model,
+            scenario="test",
+            initial_query="hi",
+            tools={"bad_tool": bad_tool},
+            tool_definitions=[{"type": "function", "function": {"name": "bad_tool"}}],
+        )
+        user.respond("go")
+        tool_msgs = [m for m in user._messages if m.get("role") == "tool"]
+        assert any("Error" in m.get("content", "") for m in tool_msgs)
+
+    def test_step_counting(self):
+        """_last_respond_steps tracks messages added during respond()."""
+        mock_model = MagicMock()
+        mock_model.chat.return_value = MagicMock(content="Hello user", tool_calls=[])
+        user = Tau2User(model=mock_model, scenario="test", initial_query="hi")
+        user.respond("agent message")
+        # Should have added: assistant msg (from respond) + user msg (from _generate_response) = 2
+        assert user._last_respond_steps >= 1
+
+
+# =============================================================================
+# Tau2User._flip_roles() Tests — Lines 282, 294-297
+# =============================================================================
+
+
+@pytest.mark.benchmark
+class TestFlipRoles:
+    """Tests for Tau2User._flip_roles() message role transformation."""
+
+    def test_user_becomes_assistant(self):
+        """User messages become assistant messages (role flip)."""
+        user = Tau2User(model=MagicMock(), scenario="test", initial_query="hi")
+        user._messages = [{"role": "user", "content": "I need help"}]
+        flipped = user._flip_roles()
+        assert flipped[0]["role"] == "assistant"
+        assert flipped[0]["content"] == "I need help"
+
+    def test_assistant_becomes_user(self):
+        """Assistant messages become user messages (role flip)."""
+        user = Tau2User(model=MagicMock(), scenario="test", initial_query="hi")
+        user._messages = [{"role": "assistant", "content": "How can I help?"}]
+        flipped = user._flip_roles()
+        assert flipped[0]["role"] == "user"
+        assert flipped[0]["content"] == "How can I help?"
+
+    def test_user_with_tool_calls_becomes_assistant_with_tools(self):
+        """User messages with tool_calls flip to assistant with tool_calls preserved."""
+        user = Tau2User(model=MagicMock(), scenario="test", initial_query="hi")
+        user._messages = [{"role": "user", "content": "", "tool_calls": [{"name": "f", "id": "tc1"}]}]
+        flipped = user._flip_roles()
+        assert flipped[0]["role"] == "assistant"
+        assert "tool_calls" in flipped[0]
+
+    def test_assistant_with_tool_calls_skipped(self):
+        """Assistant messages with tool_calls are skipped (original behavior)."""
+        user = Tau2User(model=MagicMock(), scenario="test", initial_query="hi")
+        user._messages = [{"role": "assistant", "content": "x", "tool_calls": [{"name": "f"}]}]
+        flipped = user._flip_roles()
+        assert len(flipped) == 0
+
+    def test_tool_message_user_requestor_kept(self):
+        """Tool messages with requestor=user are kept."""
+        user = Tau2User(model=MagicMock(), scenario="test", initial_query="hi")
+        user._messages = [{"role": "tool", "requestor": "user", "tool_call_id": "tc1", "content": "result"}]
+        flipped = user._flip_roles()
+        assert len(flipped) == 1
+        assert flipped[0]["role"] == "tool"
+
+    def test_tool_message_assistant_requestor_skipped(self):
+        """Tool messages with requestor=assistant are skipped."""
+        user = Tau2User(model=MagicMock(), scenario="test", initial_query="hi")
+        user._messages = [{"role": "tool", "requestor": "assistant", "content": "result"}]
+        flipped = user._flip_roles()
+        assert len(flipped) == 0
+
+    def test_mixed_messages(self):
+        """Complex mixed message sequence flips correctly."""
+        user = Tau2User(model=MagicMock(), scenario="test", initial_query="hi")
+        user._messages = [
+            {"role": "assistant", "content": "Hi!"},  # → user
+            {"role": "user", "content": "Help"},  # → assistant
+            {"role": "assistant", "content": "", "tool_calls": [{"name": "f"}]},  # → skipped
+            {"role": "tool", "requestor": "assistant", "content": "r"},  # → skipped
+            {"role": "user", "content": "", "tool_calls": [{"name": "g"}]},  # → assistant with tc
+            {"role": "tool", "requestor": "user", "tool_call_id": "tc2", "content": "r2"},  # → kept
+        ]
+        flipped = user._flip_roles()
+        assert len(flipped) == 4
+        assert flipped[0]["role"] == "user"
+        assert flipped[1]["role"] == "assistant"
+        assert flipped[2]["role"] == "assistant"
+        assert "tool_calls" in flipped[2]
+        assert flipped[3]["role"] == "tool"

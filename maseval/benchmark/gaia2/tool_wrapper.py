@@ -1,9 +1,15 @@
 """Gaia2 Benchmark - Tool Wrapper.
 
-Framework-agnostic wrapper for ARE AppTool instances, following MACSGenericTool pattern.
+Framework-agnostic wrapper for ARE AppTool instances.
 Provides clean API with built-in tracing for MASEval compatibility.
 
-Reference Paper: "GAIA-2: A Controllable Multi-Turn Conversational Benchmark for Agents"
+Original Repository: https://github.com/facebookresearch/meta-agents-research-environments
+Code License: MIT
+
+Citation:
+    Froger, R., Benhalloum, A., Rusakov, A., et al. (2026). Gaia2: Benchmarking LLM
+    Agents on Dynamic and Asynchronous Environments. ICLR 2026.
+    https://openreview.net/forum?id=9gw03JpKK4
 """
 
 from datetime import datetime
@@ -20,7 +26,7 @@ if TYPE_CHECKING:
 class Gaia2GenericTool(TraceableMixin, ConfigurableMixin):
     """Framework-agnostic wrapper for ARE tools.
 
-    Similar to MACSGenericTool - provides clean API with built-in tracing.
+    Provides clean API with built-in tracing for MASEval compatibility.
     Developers wrap this for their framework using composition.
 
     Example for smolagents:

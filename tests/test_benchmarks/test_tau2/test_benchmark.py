@@ -3,7 +3,8 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from maseval import Task
-from maseval.benchmark.tau2 import Tau2Benchmark, Tau2User
+from maseval.core.model import ChatResponse
+from maseval.benchmark.tau2 import Tau2Benchmark, Tau2User, INITIAL_GREETING
 
 
 class DummyTau2Benchmark(Tau2Benchmark):
@@ -54,8 +55,8 @@ class TestTau2BenchmarkClassStructure:
         assert hasattr(Tau2Benchmark, "get_model_adapter")
 
     def test_default_max_invocations(self):
-        """MAX_INVOCATIONS is 50 (matching tau2-bench max_steps/4)."""
-        assert Tau2Benchmark.MAX_INVOCATIONS == 50
+        """MAX_INVOCATIONS is 200 (matching original DEFAULT_MAX_STEPS)."""
+        assert Tau2Benchmark.MAX_INVOCATIONS == 200
 
     def test_setup_evaluators_returns_tau2_evaluator(self, benchmark, task, seed_gen):
         """setup_evaluators returns Tau2Evaluator."""
@@ -153,9 +154,9 @@ def test_setup_user(benchmark, task):
     user = benchmark.setup_user({}, mock_env, task, seed_gen)
 
     assert isinstance(user, Tau2User)
-    assert user.scenario == "Call about order."
-    # Check that model adapter was requested with correct ID
-    # Since we use DummyTau2Benchmark which returns a mock, we assume it worked if user is created.
+    # Scenario is formatted matching original tau2-bench UserScenario.__str__()
+    assert "Instructions:" in user.scenario
+    assert "Call about order." in user.scenario
 
 
 @pytest.mark.benchmark
@@ -309,3 +310,134 @@ class TestDefaultAgentTau2BenchmarkSeeding:
         benchmark.setup_agents({"model_id": "test-model"}, mock_env, mock_task, None, seed_generator=seed_gen)
 
         assert "agents/default_agent" in seed_gen.seed_log
+
+
+# =============================================================================
+# Execution Loop Tests (Bug Fix: Initial Greeting)
+# =============================================================================
+
+
+@pytest.mark.benchmark
+class TestTau2ExecutionLoop:
+    """Tests for Tau2Benchmark.execution_loop() with initial greeting."""
+
+    def test_greeting_constant_matches_original(self):
+        """INITIAL_GREETING matches the original tau2-bench orchestrator.py:L34-36."""
+        assert INITIAL_GREETING == "Hi! How can I help you today?"
+
+    def test_user_generates_initial_query_via_respond(self, benchmark, task):
+        """C7: execution_loop calls user.respond(INITIAL_GREETING) for initial query."""
+        mock_agent = MagicMock()
+        mock_agent.run.return_value = "Agent response"
+
+        user = MagicMock()
+        # First respond() call is for initial query; second is after agent response
+        user.respond.side_effect = ["I need help", ""]
+        user.is_done.return_value = True
+
+        benchmark.execution_loop([mock_agent], task, MagicMock(), user)
+
+        # First call should be with INITIAL_GREETING (user generates initial query)
+        assert user.respond.call_args_list[0][0][0] == INITIAL_GREETING
+
+    def test_no_greeting_without_user(self, benchmark, task):
+        """execution_loop works without user (uses task.query, no greeting)."""
+        mock_agent = MagicMock()
+        mock_agent.run.return_value = "Response"
+
+        result = benchmark.execution_loop([mock_agent], task, MagicMock(), None)
+
+        assert result == "Response"
+        mock_agent.run.assert_called_once_with(task.query)
+
+    def test_respond_called_with_greeting_then_agent_response(self, benchmark, task):
+        """C7: respond() is called first with INITIAL_GREETING, then with agent output."""
+        mock_agent = MagicMock()
+        mock_agent.run.return_value = "How can I assist?"
+
+        call_args = []
+
+        user = MagicMock()
+
+        def track_respond(msg):
+            call_args.append(msg)
+            if len(call_args) == 1:
+                return "I need help"
+            return "Thanks"
+
+        user.respond.side_effect = track_respond
+        user.is_done.return_value = True
+
+        benchmark.execution_loop([mock_agent], task, MagicMock(), user)
+
+        # First respond call is with greeting, second with agent response
+        assert call_args[0] == INITIAL_GREETING
+        assert call_args[1] == "How can I assist?"
+
+
+# =============================================================================
+# DefaultTau2Agent Tool Call Counter Tests (Bug Fix: Counter Reset)
+# =============================================================================
+
+
+@pytest.mark.benchmark
+class TestDefaultTau2AgentToolCallReset:
+    """Tests for DefaultTau2Agent._tool_call_count resetting per turn."""
+
+    def test_tool_call_count_resets_per_turn(self):
+        """_tool_call_count resets at the start of each run() call."""
+        from maseval.benchmark.tau2 import DefaultTau2Agent
+
+        mock_model = MagicMock()
+        agent = DefaultTau2Agent(
+            tools={"get_order": lambda order_id: {"id": order_id}},
+            policy="Test policy",
+            model=mock_model,
+            max_tool_calls=10,
+        )
+
+        # Turn 1: model returns tool call then text
+        tool_response = MagicMock(spec=ChatResponse)
+        tool_response.content = ""
+        tool_response.tool_calls = [{"id": "1", "function": {"name": "get_order", "arguments": '{"order_id": "123"}'}}]
+
+        text_response = MagicMock(spec=ChatResponse)
+        text_response.content = "Here is your order."
+        text_response.tool_calls = []
+
+        mock_model.chat.side_effect = [tool_response, text_response]
+        agent.run("Turn 1 query")
+        assert agent._tool_call_count == 1
+
+        # Turn 2: counter should reset, not accumulate from turn 1
+        mock_model.chat.side_effect = [tool_response, tool_response, text_response]
+        agent.run("Turn 2 query")
+        assert agent._tool_call_count == 2  # 2 tool calls in THIS turn, not 3
+
+    def test_tool_call_count_starts_at_zero_each_turn(self):
+        """Each run() call starts with _tool_call_count = 0."""
+        from maseval.benchmark.tau2 import DefaultTau2Agent
+
+        mock_model = MagicMock()
+        agent = DefaultTau2Agent(
+            tools={},
+            policy="Test policy",
+            model=mock_model,
+        )
+
+        # Simulate a text-only response (no tool calls)
+        text_response = MagicMock(spec=ChatResponse)
+        text_response.content = "Hello"
+        text_response.tool_calls = []
+
+        mock_model.chat.side_effect = [text_response]
+        agent.run("Query 1")
+        assert agent._tool_call_count == 0
+
+        # Manually set counter to simulate previous accumulation
+        agent._tool_call_count = 42
+
+        mock_model.chat.side_effect = [text_response]
+        agent.run("Query 2")
+        # Should have been reset to 0 at start of run(), not still 42
+        assert agent._tool_call_count == 0

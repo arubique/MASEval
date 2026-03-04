@@ -12,7 +12,7 @@ Adapted from: src/tau2/domains/telecom/tools.py
 
 import uuid
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Union
 
 from maseval.benchmark.tau2.domains.base import ToolKitBase, ToolType, is_tool
@@ -29,9 +29,14 @@ from maseval.benchmark.tau2.domains.telecom.models import (
 )
 
 
+def get_now() -> datetime:
+    """Get current datetime. Returns a fixed datetime for reproducibility."""
+    return datetime(2025, 2, 25, 12, 8, 0)
+
+
 def get_today() -> date:
     """Get today's date. Returns a fixed date for reproducibility."""
-    return date(2025, 3, 15)  # Fixed date matching tau2-bench
+    return date(2025, 2, 25)  # Fixed date matching tau2-bench
 
 
 class IDGenerator:
@@ -624,10 +629,10 @@ class TelecomTools(ToolKitBase[TelecomDB]):
         target_line = self._get_target_line(customer_id, line_id)
         return abs(target_line.data_refueling_gb - expected_amount) < 1e-6
 
-    def assert_line_status(self, customer_id: str, line_id: str, expected_status: str) -> bool:
+    def assert_line_status(self, customer_id: str, line_id: str, expected_status: LineStatus) -> bool:
         """Assert that the line status is as expected."""
         target_line = self._get_target_line(customer_id, line_id)
-        return target_line.status.value == expected_status or target_line.status == expected_status
+        return target_line.status == expected_status
 
     def assert_overdue_bill_exists(self, customer_id: str, overdue_bill_id: str) -> bool:
         """Assert that the overdue bill exists."""

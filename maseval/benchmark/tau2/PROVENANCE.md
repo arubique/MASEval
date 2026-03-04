@@ -123,6 +123,110 @@ if not order_id.startswith("#"):
 
 MASEval normalizes order IDs by adding the `#` prefix if missing. The original tau2-bench does not normalize, causing "Order not found" errors when LLMs omit the prefix. This is a minor leniency that improves usability without fundamentally changing task difficulty.
 
+## Known Architectural Divergences
+
+These structural differences arise from MASEval's framework architecture. They are
+documented here for transparency.
+
+### Step Counting
+
+**Original:** `max_steps=100` (default) counts ALL message exchanges (agent→user,
+user→agent, agent→env, env→agent). One orchestrator-level counter for the entire
+conversation. Source: tau2-bench `orchestrator.py` default `max_steps=100`.
+
+**MASEval:** Two separate mechanisms:
+
+- `max_invocations=50` (benchmark-level): agent-user interaction rounds
+- `max_tool_calls=50` (agent-internal): tool calls per agent turn
+
+With ~4 message exchanges per invocation, `max_steps=100 ≈ 25 invocations`. The
+value 50 provides headroom.
+
+### Agent Architecture
+
+**Original:** Orchestrator calls `agent.generate_next_message()` which returns ONE
+message (text or tool calls). Tool routing happens at the orchestrator level.
+
+**MASEval:** `DefaultTau2Agent.run()` handles tool routing internally via a ReAct
+loop, returning only the final text response.
+
+### Max Tool Calls Error Message
+
+**Original:** When `max_steps` is reached, the orchestrator stops. No error message
+is generated.
+
+**MASEval:** When `max_tool_calls` is reached, `DefaultTau2Agent._generate_with_tools()`
+returns: `"I apologize, but I've encountered an issue processing your request. Please try again."`
+This message does not exist in the original and could affect evaluation of
+communication-check assertions.
+
+### max_errors
+
+**Original:** Has `max_errors=10` parameter but `num_errors` is never incremented
+(dead code). Source: tau2-bench `orchestrator.py`.
+
+**MASEval:** Does not implement error tracking.
+
+### User Initial Query
+
+**Original:** User simulator generates initial query via LLM in response to the
+agent's greeting.
+
+**MASEval:** Uses pre-set `task.query` as the initial query. The greeting is injected
+into the user's message history (so subsequent `respond()` calls see it), but the
+initial query itself is not LLM-generated.
+
+### Separate Message Histories
+
+**Original:** The orchestrator maintains ONE trajectory (list of messages). Both
+agent and user see filtered views of this shared trajectory.
+
+**MASEval:** Agent and user maintain separate `MessageHistory` instances.
+
+### User Tool Execution Routing
+
+**Original:** User tool calls are routed through the orchestrator to the environment,
+each consuming a step.  The environment's `make_tool_call()` dispatches based on the
+`requestor` field, `sync_tools()` runs after every step, and tool call/result messages
+appear in the global trajectory.
+
+**MASEval:** User tools are executed inline within `Tau2User._generate_response()`.
+The user LLM generates a tool call, the wrapped callable is invoked directly, the
+result is appended to the user's internal messages, and the loop continues until a
+text response is produced.  Tool calls still trigger `sync_tools()` via the wrapper,
+and internal step counting (`_last_respond_steps`) tracks the correct number of
+messages produced.
+
+**Impact on evaluation:** None for current task data.  The evaluator reconstructs DB
+state by replaying tool calls from the trajectory (including user tool calls with
+their `requestor` field).  Communication evaluation only examines assistant messages.
+Action evaluation extracts both assistant and user tool calls, but no task pairs user
+golden actions with `ACTION` in its `reward_basis`.
+
+### Content-as-List Handling
+
+**Original:** Uses typed Pydantic `AssistantMessage` where `content: Optional[str]`
+is always a string.  Content-as-list never occurs.
+
+**MASEval:** Uses plain dictionaries for messages to support multiple LLM providers.
+Some providers (e.g., Anthropic) return `content` as a list of blocks
+(`[{"type": "text", "text": "..."}]`) instead of a plain string.  The communication
+evaluator (`_evaluate_communication`) joins list blocks into a single string before
+performing substring matching.  Without this, evaluation would crash with
+`AttributeError` for list-typed content.
+
+### TelecomDB Structure
+
+**Original:** `TelecomDB` and `TelecomUserDB` are separate objects.  `TelecomTools`
+receives `TelecomDB`, `TelecomUserTools` receives `TelecomUserDB`.  Hashes are
+computed independently.
+
+**MASEval:** `TelecomUserDB` is embedded as a `user_db` field inside `TelecomDB`.
+Both toolkits share the same `TelecomDB` instance.  `TelecomUserTools` accesses user
+state via `self.db.user_db`.  The `get_db_hash()` method on `Tau2Environment`
+explicitly excludes `user_db` from the agent-side hash to match the original's
+independent hashing.
+
 ## Validation Strategy
 
 1. **Deterministic evaluators** (env, action): Exact DB state hash match with upstream v0.2.0

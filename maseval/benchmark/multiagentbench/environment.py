@@ -1,6 +1,14 @@
 """MultiAgentBench Environment implementation.
 
 This module provides the MASEval Environment wrapper for MARBLE environments.
+
+Original Repository: https://github.com/ulab-uiuc/MARBLE
+Fork Used: https://github.com/cemde/MARBLE (contains bug fixes for MASEval integration)
+Code License: MIT
+
+Citation:
+    Zhu, et al. (2025). MultiAgentBench: Evaluating the Collaboration and Competition
+    of LLM agents. arXiv:2503.01935.
 """
 
 import importlib
@@ -69,13 +77,15 @@ class MultiAgentBenchEnvironment(Environment):
                     component="MultiAgentBenchEnvironment",
                 )
 
-        # Build config for MARBLE environment
-        marble_config = {
-            "description": env_config.get("description", f"{domain} environment"),
-            "task_description": task_config.get("content", "") if isinstance(task_config, dict) else str(task_config),
-            "ground_truth": env_config.get("ground_truth", ""),
-            "max_iterations": env_config.get("max_iterations") or task_data.get("max_iterations", 10),
-        }
+        # Pass full env_config to MARBLE environments, matching
+        # Engine._initialize_environment() (engine.py:102) which passes
+        # config.environment directly. Domain-specific environments read
+        # additional fields (e.g., init_sql/test_sql/anomalies for DB,
+        # workspace_dir for Coding) that would be lost by filtering.
+        marble_config = dict(env_config)
+        # task_description comes from the task section, not environment.
+        # Default '' matches engine.py:83: config.task.get("content", "")
+        marble_config["task_description"] = task_config.get("content", "") if isinstance(task_config, dict) else str(task_config)
 
         # Pass werewolf config path for WerewolfEnv (different constructor)
         if domain.lower() == "werewolf":
@@ -88,7 +98,10 @@ class MultiAgentBenchEnvironment(Environment):
             "env_config": env_config,
             "task_config": task_config,
             "marble_env_type": type(self._marble_env).__name__,
-            "max_iterations": marble_config["max_iterations"],
+            # Prefer top-level max_iterations (int-converted by data_loader)
+            # over env_config value which may be a raw string from JSONL.
+            # Default 10 from engine.py:97: config.environment.get("max_iterations", 10)
+            "max_iterations": task_data["max_iterations"] if "max_iterations" in task_data else int(env_config.get("max_iterations", 10)),
         }
 
     def _check_infrastructure(self, domain: str) -> bool:
