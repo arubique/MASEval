@@ -93,6 +93,7 @@ tests/
 └── test_benchmarks/            # Benchmark tests (marked benchmark)
     ├── test_tau2/              # Tau2 benchmark + data integrity
     ├── test_macs/              # MACS benchmark + data integrity
+    ├── test_mmlu/              # MMLU benchmark + DISCO integration
     ├── test_gaia2/             # GAIA2 benchmark + data integrity
     └── test_multiagentbench/   # MultiAgentBench + data integrity
 ```
