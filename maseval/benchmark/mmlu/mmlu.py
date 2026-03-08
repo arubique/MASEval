@@ -8,32 +8,25 @@ Dataset: MMLU (Massive Multitask Language Understanding)
 
 Usage:
     from maseval.benchmark.mmlu import (
-        MMLUBenchmark, load_tasks, AnchorPointsTaskQueue
+        HuggingFaceMMLUBenchmark, load_tasks,
     )
+    from maseval import AnchorPointsTaskQueue
 
-    # Load tasks filtered to anchor points
+    # Load tasks (optionally filtered to anchor points)
     tasks = load_tasks(
         data_path="/path/to/mmlu_prompts_examples.json",
         anchor_points_path="/path/to/anchor_points.pkl",
     )
 
-    # Create benchmark with HuggingFace model
-    class MyMMLUBenchmark(MMLUBenchmark):
-        def get_model_adapter(self, model_id, **kwargs):
-            from transformers import pipeline
-            from maseval.interface.inference import HuggingFaceModelAdapter
-            pipe = pipeline("text-generation", model=model_id)
-            return HuggingFaceModelAdapter(model=pipe, model_id=model_id)
-
-    benchmark = MyMMLUBenchmark()
-    results = benchmark.run(tasks=tasks, agent_data={"model_id": "meta-llama/Llama-2-7b"})
+    # Run with the HuggingFace concrete implementation
+    benchmark = HuggingFaceMMLUBenchmark(model_id="meta-llama/Llama-2-7b-hf")
+    results = benchmark.run(tasks=tasks, agent_data={"model_id": "meta-llama/Llama-2-7b-hf"})
 """
 
 import json
 import pickle
-from abc import abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
 
 # numpy is optional - only needed for anchor points processing
 try:
@@ -46,6 +39,7 @@ except ImportError:
 
 from maseval import (
     AgentAdapter,
+    AnchorPointsTaskQueue,
     Benchmark,
     Environment,
     Evaluator,
@@ -55,7 +49,7 @@ from maseval import (
     User,
     SeedGenerator,
 )
-from maseval.core.task import AdaptiveTaskQueue, SequentialTaskQueue
+from maseval.core.task import SequentialTaskQueue
 from maseval.core.tracing import TraceableMixin
 from maseval.core.config import ConfigurableMixin
 
@@ -72,107 +66,7 @@ DEFAULT_MODEL_REGISTER_NAME = "mmlu_model"
 TARGET_DELIMITER = " "  # lm-eval convention for MCQ
 MMLU_TASK_NAME = "mmlu_prompts"
 TASK_TYPE_MMLU = "mmlu"
-FALLBACK_MODEL_ID = "unknown"
 STATUS_SUCCESS = "success"
-
-
-# =============================================================================
-# Task Queue
-# =============================================================================
-
-
-class AnchorPointsTaskQueue(AdaptiveTaskQueue):
-    """Task queue that iterates through tasks in anchor points order.
-
-    This queue is used for DISCO-based evaluation where we only evaluate
-    on a subset of anchor tasks and predict performance on the full dataset.
-
-    The queue iterates through tasks in the order specified by anchor_points,
-    and stops when all anchor tasks have been processed.
-    """
-
-    def __init__(self, tasks: List[Task], anchor_points: Optional[List[int]] = None):
-        """Initialize anchor points task queue.
-
-        Args:
-            tasks: Full list of tasks (ordered by doc_id).
-            anchor_points: Optional list of task indices (doc_ids) to evaluate.
-                If None, evaluates all tasks in order.
-        """
-        # If anchor_points provided, filter tasks to only include anchor tasks
-        # This dramatically improves performance by avoiding O(n²) iteration
-        if anchor_points is not None:
-            # Build index mapping for quick lookup
-            task_by_doc_id: Dict[int, Task] = {}
-            for i, task in enumerate(tasks):
-                doc_id = task.metadata.get("doc_id", i)
-                task_by_doc_id[doc_id] = task
-
-            # Filter to only anchor tasks, preserving anchor order
-            anchor_tasks = []
-            for doc_id in anchor_points:
-                task = task_by_doc_id.get(doc_id)
-                if task is not None:
-                    anchor_tasks.append(task)
-
-            # Store original for reference
-            self._all_tasks = tasks
-            self._task_by_doc_id = task_by_doc_id
-            tasks = anchor_tasks
-
-        super().__init__(tasks)
-        self._anchor_points = anchor_points
-        self._anchor_idx = 0
-
-        # Initialize state immediately (since __iter__ is overridden and skips initial_state())
-        self._state = self.initial_state()
-
-    def __iter__(self) -> Iterator[Task]:
-        """Yield tasks in anchor point order.
-
-        Since tasks are pre-filtered during __init__, we simply iterate
-        over the stored tasks in order. This avoids the infinite loop
-        issue in AdaptiveTaskQueue.__iter__ which relies on on_task_repeat_end
-        to remove tasks from _remaining.
-        """
-        return iter(self._tasks)
-
-    def initial_state(self) -> Dict[str, Any]:
-        """Initialize state for anchor point iteration."""
-        return {
-            "anchor_idx": 0,
-            "completed_anchors": [],
-        }
-
-    def select_next_task(self, remaining: Sequence[Task], state: Dict[str, Any]) -> Optional[Task]:
-        """Select the next anchor task to execute.
-
-        Args:
-            remaining: Tasks not yet executed.
-            state: Current state with anchor_idx.
-
-        Returns:
-            Next anchor task, or None if all anchors processed.
-        """
-        # Simply return the first remaining task since we pre-filtered to anchor tasks only
-        return remaining[0] if remaining else None
-
-    def update_state(self, task: Task, report: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
-        """Update state after task completion.
-
-        Args:
-            task: Completed task.
-            report: Execution report.
-            state: Current state.
-
-        Returns:
-            Updated state.
-        """
-        doc_id = task.metadata.get("doc_id")
-        state["completed_anchors"].append(doc_id)
-        state["anchor_idx"] += 1
-
-        return state
 
 
 # =============================================================================
@@ -188,12 +82,18 @@ class MMLUEnvironment(Environment):
     """
 
     def setup_state(self, task_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Initialize state from task data."""
+        """Initialize state from task data.
+
+        Args:
+            task_data: Must contain ``"query"`` (str) and ``"environment_data"``
+                (dict with optional ``"choices"``, ``"full_prompt"``, ``"use_full_prompt"``).
+        """
+        env_data = task_data["environment_data"]
         return {
-            "query": task_data.get("query", ""),
-            "choices": task_data.get("environment_data", {}).get("choices", []),
-            "full_prompt": task_data.get("environment_data", {}).get("full_prompt", ""),
-            "use_full_prompt": task_data.get("environment_data", {}).get("use_full_prompt", False),
+            "query": task_data["query"],
+            "choices": env_data.get("choices", DEFAULT_CHOICES),
+            "full_prompt": env_data.get("full_prompt", ""),
+            "use_full_prompt": env_data.get("use_full_prompt", False),
         }
 
     def create_tools(self) -> Dict[str, Any]:
@@ -203,11 +103,11 @@ class MMLUEnvironment(Environment):
     def get_prompt(self) -> str:
         """Get the prompt to send to the model.
 
-        Returns full_prompt if use_full_prompt is True, otherwise query.
+        Returns ``full_prompt`` if ``use_full_prompt`` is True, otherwise ``query``.
         """
-        if self.state.get("use_full_prompt", False):
-            return self.state.get("full_prompt", self.state.get("query", ""))
-        return self.state.get("query", "")
+        if self.state["use_full_prompt"]:
+            return self.state["full_prompt"]
+        return self.state["query"]
 
 
 # =============================================================================
@@ -231,13 +131,14 @@ class MMLUEvaluator(Evaluator):
         """Initialize MMLU evaluator.
 
         Args:
-            task: Task being evaluated (contains gold answer).
+            task: Task being evaluated. Must have ``evaluation_data["gold"]`` (int)
+                with the correct answer index.
             environment: Environment (provides choices).
             user: Unused for MMLU.
         """
         self.task = task
         self.environment = environment
-        self.gold = task.evaluation_data.get("gold", 0)
+        self.gold = task.evaluation_data["gold"]
         self.choices = task.environment_data.get("choices", DEFAULT_CHOICES)
 
     def filter_traces(self, traces: Dict[str, Any]) -> Dict[str, Any]:
@@ -436,19 +337,12 @@ class MMLUBenchmark(Benchmark):
     Evaluates language models on MMLU multiple choice questions.
     Supports anchor point-based evaluation for DISCO prediction.
 
-    Users must subclass and implement:
-    - get_model_adapter() to provide model adapters
+    Subclasses must implement:
 
-    Usage:
-        class MyMMLUBenchmark(MMLUBenchmark):
-            def get_model_adapter(self, model_id, **kwargs):
-                from transformers import pipeline
-                from maseval.interface.inference import HuggingFaceModelAdapter
-                pipe = pipeline("text-generation", model=model_id)
-                return HuggingFaceModelAdapter(model=pipe, model_id=model_id)
+    - ``setup_agents()`` - create agents for MCQ evaluation
+    - ``get_model_adapter()`` - provide model adapters
 
-        benchmark = MyMMLUBenchmark()
-        results = benchmark.run(tasks=tasks, agent_data={"model_id": "llama-7b"})
+    For a ready-to-use implementation, see ``HuggingFaceMMLUBenchmark``.
     """
 
     def __init__(
@@ -480,7 +374,7 @@ class MMLUBenchmark(Benchmark):
             "query": task.query,
             "environment_data": {
                 **task.environment_data,
-                "use_full_prompt": self.use_full_prompt or agent_data.get("use_full_prompt", False),
+                "use_full_prompt": self.use_full_prompt,
             },
         }
         return MMLUEnvironment(task_data)
@@ -494,33 +388,6 @@ class MMLUBenchmark(Benchmark):
     ) -> Optional[User]:
         """MMLU doesn't use a user simulator."""
         return None
-
-    def setup_agents(
-        self,
-        agent_data: Dict[str, Any],
-        environment: Environment,
-        task: Task,
-        user: Optional[User],
-        seed_generator: SeedGenerator,
-    ) -> Tuple[Sequence[AgentAdapter], Dict[str, AgentAdapter]]:
-        """Create model agent for MCQ evaluation.
-
-        Args:
-            agent_data: Agent config with model_id.
-            environment: MMLU environment.
-            task: Current task.
-            user: Unused.
-
-        Returns:
-            Tuple of (agents_to_run, agents_dict).
-        """
-        model_id = agent_data.get("model_id", FALLBACK_MODEL_ID)
-        model = self.get_model_adapter(model_id, register_name=DEFAULT_MODEL_REGISTER_NAME)
-
-        agent = MMLUModelAgent(model, name=DEFAULT_AGENT_NAME)
-        adapter = MMLUAgentAdapter(agent, DEFAULT_AGENT_NAME)
-
-        return [adapter], {DEFAULT_AGENT_NAME: adapter}
 
     def setup_evaluators(
         self,
@@ -547,21 +414,6 @@ class MMLUBenchmark(Benchmark):
         # Run the agent
         agent = agents[0]
         return agent.run(prompt)
-
-    @abstractmethod
-    def get_model_adapter(self, model_id: str, **kwargs) -> ModelAdapter:
-        """Provide a ModelAdapter for the model.
-
-        Must be implemented by subclass.
-
-        Args:
-            model_id: Model identifier.
-            **kwargs: Additional arguments (e.g., register_name for tracing).
-
-        Returns:
-            ModelAdapter instance.
-        """
-        pass
 
     def evaluate(
         self,
@@ -598,7 +450,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         trust_remote_code: bool = True,
         use_full_prompt: bool = True,
         batch_size: int = DEFAULT_BATCH_SIZE,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initialize HuggingFace MMLU benchmark.
 
@@ -617,6 +469,34 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
         self._batch_size = batch_size
         self._model = None
         self._tokenizer = None
+
+    def setup_agents(
+        self,
+        agent_data: Dict[str, Any],
+        environment: Environment,
+        task: Task,
+        user: Optional[User],
+        seed_generator: SeedGenerator,
+    ) -> Tuple[Sequence[AgentAdapter], Dict[str, AgentAdapter]]:
+        """Create model agent for MCQ evaluation.
+
+        Args:
+            agent_data: Agent config. Must contain ``"model_id"`` (str).
+            environment: MMLU environment.
+            task: Current task.
+            user: Unused.
+            seed_generator: Seed generator (unused for MMLU).
+
+        Returns:
+            Tuple of (agents_to_run, agents_dict).
+        """
+        model_id = agent_data["model_id"]
+        model = self.get_model_adapter(model_id, register_name=DEFAULT_MODEL_REGISTER_NAME)
+
+        agent = MMLUModelAgent(model, name=DEFAULT_AGENT_NAME)
+        adapter = MMLUAgentAdapter(agent, DEFAULT_AGENT_NAME)
+
+        return [adapter], {DEFAULT_AGENT_NAME: adapter}
 
     def _load_model(self):
         """Lazy load the model and tokenizer for log-likelihood computation."""
@@ -795,7 +675,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
 
         return all_logprobs
 
-    def precompute_all_logprobs_lmeval(self, tasks) -> dict:
+    def precompute_all_logprobs_lmeval(self, tasks: Sequence[Task]) -> Dict[Any, List[float]]:
         """Precompute log-likelihoods for ALL tasks using lm-eval's batching.
 
         CRITICAL: lm-evaluation-harness batches ALL requests together and uses
@@ -931,11 +811,11 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
 
     def run_agents(
         self,
-        agents,
-        task,
-        environment,
+        agents: Sequence[AgentAdapter],
+        task: Task,
+        environment: Environment,
         query: str = "",
-    ):
+    ) -> Any:
         """Execute log-likelihood based MCQ evaluation.
 
         Uses precomputed logprobs if available (for exact lm-eval match),
@@ -1017,7 +897,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
 
         return answer
 
-    def get_model_adapter(self, model_id: str, **kwargs):
+    def get_model_adapter(self, model_id: str, **kwargs: Any) -> ModelAdapter:
         """Provide a HuggingFace ModelAdapter.
 
         Note: For logprobs-based evaluation, we don't actually use the adapter
@@ -1028,7 +908,7 @@ class HuggingFaceMMLUBenchmark(MMLUBenchmark):
             **kwargs: Additional arguments (e.g., register_name).
 
         Returns:
-            HuggingFaceModelAdapter instance.
+            ``HuggingFaceModelAdapter`` instance.
         """
         from maseval.interface.inference import HuggingFaceModelAdapter
 
@@ -1112,8 +992,15 @@ def load_tasks(
     # Convert to Tasks
     tasks = []
     for i, item in enumerate(data):
+        query = item.get("query") or item.get("example")
+        if query is None:
+            raise ValueError(f"MMLU task at index {i} has neither 'query' nor 'example' field")
+
+        if "gold" not in item:
+            raise ValueError(f"MMLU task at index {i} missing required 'gold' field (correct answer index)")
+
         task = Task(
-            query=item.get("query", item.get("example", "")),
+            query=query,
             id=f"mmlu_{i}",
             environment_data={
                 "choices": item.get("choices", DEFAULT_CHOICES),
@@ -1121,7 +1008,7 @@ def load_tasks(
                 "example": item.get("example", ""),
             },
             evaluation_data={
-                "gold": item.get("gold", 0),
+                "gold": item["gold"],
             },
             metadata={
                 "doc_id": i,

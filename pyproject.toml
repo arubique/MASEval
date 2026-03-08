@@ -82,6 +82,7 @@ multiagentbench = [
 ]
 tau2 = ["docstring-parser>=0.16", "addict>=2.4.0"]
 converse = []
+mmlu = []
 
 # LM Evaluation Harness (for HuggingFaceMMLUBenchmark.precompute_all_logprobs_lmeval)
 lm-eval = ["lm-eval @ git+https://github.com/arubique/lm-evaluation-harness.git@main"]

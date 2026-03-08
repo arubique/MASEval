@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Benchmarks**
 
-- MMLU Benchmark with DISCO support: Integration for evaluating language models on MMLU (Massive Multitask Language Understanding) multiple-choice questions, compatible with DISCO anchor-point methodology. Includes `MMLUBenchmark`, `HuggingFaceMMLUBenchmark`, `MMLUEnvironment`, `MMLUEvaluator`, `MMLUModelAgent`, `MMLUAgentAdapter`, `AnchorPointsTaskQueue`, `load_tasks()`, and `compute_benchmark_metrics()`. Optional extras: `lm-eval` (for `HuggingFaceMMLUBenchmark.precompute_all_logprobs_lmeval`), `disco` (for DISCO prediction in the example). (PR: #34)
+- MMLU Benchmark with DISCO support: Integration for evaluating language models on MMLU (Massive Multitask Language Understanding) multiple-choice questions, compatible with DISCO anchor-point methodology. Includes `MMLUBenchmark`, `HuggingFaceMMLUBenchmark`, `MMLUEnvironment`, `MMLUEvaluator`, `MMLUModelAgent`, `MMLUAgentAdapter`, `load_tasks()`, and `compute_benchmark_metrics()`. Install with `pip install maseval[mmlu]`. Optional extras: `lm-eval` (for `HuggingFaceMMLUBenchmark.precompute_all_logprobs_lmeval`), `disco` (for DISCO prediction in the example). (PR: #34)
 
 - CONVERSE benchmark for contextual safety evaluation in adversarial agent-to-agent conversations, including `ConverseBenchmark`, `DefaultAgentConverseBenchmark`, `ConverseEnvironment`, `ConverseExternalAgent`, `PrivacyEvaluator`, `SecurityEvaluator`, and `load_tasks()` utilities for `travel`, `real_estate`, and `insurance` domains. Benchmark source files are now downloaded on first use via `ensure_data_exists()` instead of being bundled in the package. (PR: #28)
 
@@ -35,11 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Examples**
 
 - MMLU benchmark example at `examples/mmlu_benchmark/` for evaluating HuggingFace models on MMLU with optional DISCO prediction (`--disco_model_path`, `--disco_transform_path`). Supports local data, HuggingFace dataset repos, and DISCO weights from .pkl/.npz or HF repos. (PR: #34)
+- MMLU benchmark documentation at `docs/benchmark/mmlu.md` with installation, quick start, and API reference. (PR: #34)
 - Added a dedicated runnable CONVERSE default benchmark example at `examples/converse_benchmark/default_converse_benchmark.py` for quick start with `DefaultAgentConverseBenchmark`. (PR: #28)
 - Gaia2 benchmark example with Google GenAI and OpenAI model support (PR: #26)
 
 **Core**
 
+- Added `AnchorPointsTaskQueue` to `maseval.core.task` for subset-based evaluation (e.g., anchor-point selection for DISCO). Available via `from maseval import AnchorPointsTaskQueue`. (PR: #34)
 - Added `SeedGenerator` abstract base class and `DefaultSeedGenerator` implementation for reproducible benchmark runs via SHA-256-based seed derivation (PR: #24)
 - Added `seed` and `seed_generator` parameters to `Benchmark.__init__` for enabling reproducibility (PR: #24)
 - Added `seed_generator` parameter to all benchmark setup methods (`setup_environment`, `setup_user`, `setup_agents`, `setup_evaluators`) (PR: #24)
@@ -86,6 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Benchmarks**
 
+- `MMLUBenchmark` no longer implements `setup_agents()` — consistent with other benchmarks, agent creation is left to concrete subclasses (e.g., `HuggingFaceMMLUBenchmark`). Removed silent `.get()` fallbacks for required fields (`gold`, `query`, `model_id`) so missing data surfaces errors immediately instead of failing silently. `AnchorPointsTaskQueue` moved from `maseval.benchmark.mmlu` to `maseval.core.task` and now extends `SequentialTaskQueue` instead of `AdaptiveTaskQueue`. Added `mmlu` optional extra (`pip install maseval[mmlu]`). (PR: #34)
 - `MACSBenchmark` and `Tau2Benchmark` benchmarks now actively use the seeding system by deriving seeds for model adapters. Seeds are passed to agents, user simulators, tool simulators, and LLM-based evaluators for reproducible runs. (PR: #26)
   - `Gaia2Benchmark`: Seeds `agents/gaia2_agent`, `evaluators/judge`
   - `MACSBenchmark`: Seeds `environment/tools/tool_{name}`, `simulators/user`, `evaluators/user_gsr`, `evaluators/system_gsr`

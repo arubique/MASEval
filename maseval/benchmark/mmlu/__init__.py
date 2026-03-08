@@ -4,12 +4,10 @@ Implements MMLU evaluation with anchor point-based task selection for DISCO pred
 
 Usage:
     from maseval.benchmark.mmlu import (
-        MMLUBenchmark,
-        MMLUEnvironment,
-        MMLUEvaluator,
+        HuggingFaceMMLUBenchmark,
         load_tasks,
-        AnchorPointsTaskQueue,
     )
+    from maseval import AnchorPointsTaskQueue
 
     # Load tasks and anchor points
     tasks = load_tasks(
@@ -17,10 +15,12 @@ Usage:
         anchor_points_path="path/to/anchor_points.pkl",  # Optional
     )
 
-    # Create benchmark
-    benchmark = MMLUBenchmark()
-    results = benchmark.run(tasks=tasks, agent_data={"model_id": "gpt-4"})
+    # Run benchmark
+    benchmark = HuggingFaceMMLUBenchmark(model_id="meta-llama/Llama-2-7b-hf")
+    results = benchmark.run(tasks=tasks, agent_data={"model_id": "meta-llama/Llama-2-7b-hf"})
 """
+
+from maseval import AnchorPointsTaskQueue
 
 from .mmlu import (
     DEFAULT_AGENT_NAME,
@@ -28,7 +28,6 @@ from .mmlu import (
     DEFAULT_CHOICES,
     DEFAULT_DEVICE,
     DEFAULT_MODEL_REGISTER_NAME,
-    FALLBACK_MODEL_ID,
     MMLU_TASK_NAME,
     STATUS_SUCCESS,
     TARGET_DELIMITER,
@@ -39,7 +38,6 @@ from .mmlu import (
     MMLUEvaluator,
     MMLUModelAgent,
     MMLUAgentAdapter,
-    AnchorPointsTaskQueue,
     load_tasks,
     compute_benchmark_metrics,
 )
@@ -50,7 +48,6 @@ __all__ = [
     "DEFAULT_CHOICES",
     "DEFAULT_DEVICE",
     "DEFAULT_MODEL_REGISTER_NAME",
-    "FALLBACK_MODEL_ID",
     "MMLU_TASK_NAME",
     "STATUS_SUCCESS",
     "TARGET_DELIMITER",
