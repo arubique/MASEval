@@ -7,7 +7,7 @@ Usage:
         HuggingFaceMMLUBenchmark,
         load_tasks,
     )
-    from maseval import AnchorPointsTaskQueue
+    from maseval import DISCOQueue, InformativeSubsetQueue
 
     # Load tasks and anchor points
     tasks = load_tasks(
@@ -20,7 +20,7 @@ Usage:
     results = benchmark.run(tasks=tasks, agent_data={"model_id": "meta-llama/Llama-2-7b-hf"})
 """
 
-from maseval import AnchorPointsTaskQueue
+from maseval import DISCOQueue
 
 from .mmlu import (
     DEFAULT_AGENT_NAME,
@@ -58,7 +58,8 @@ __all__ = [
     "MMLUEvaluator",
     "MMLUModelAgent",
     "MMLUAgentAdapter",
-    "AnchorPointsTaskQueue",
+    "InformativeSubsetQueue",
+    "DISCOQueue",
     "load_tasks",
     "compute_benchmark_metrics",
 ]

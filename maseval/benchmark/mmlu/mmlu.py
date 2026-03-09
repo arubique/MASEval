@@ -10,7 +10,7 @@ Usage:
     from maseval.benchmark.mmlu import (
         HuggingFaceMMLUBenchmark, load_tasks,
     )
-    from maseval import AnchorPointsTaskQueue
+    from maseval import DISCOQueue
 
     # Load tasks (optionally filtered to anchor points)
     tasks = load_tasks(
@@ -39,7 +39,7 @@ except ImportError:
 
 from maseval import (
     AgentAdapter,
-    AnchorPointsTaskQueue,
+    DISCOQueue,
     Benchmark,
     Environment,
     Evaluator,
@@ -963,13 +963,13 @@ def load_tasks(
     data_path: Union[str, Path],
     anchor_points_path: Optional[Union[str, Path]] = None,
     limit: Optional[int] = None,
-) -> Union[AnchorPointsTaskQueue, SequentialTaskQueue]:
+) -> Union[DISCOQueue, SequentialTaskQueue]:
     """Load MMLU tasks from JSON file.
 
     Args:
         data_path: Path to MMLU prompts JSON file (mmlu_prompts_examples.json format).
         anchor_points_path: Optional path to anchor points pickle file.
-            If provided, returns an AnchorPointsTaskQueue that evaluates
+            If provided, returns an DISCOQueue that evaluates
             only the anchor tasks in order.
         limit: Optional limit on number of tasks to load.
 
@@ -1024,7 +1024,7 @@ def load_tasks(
 
     # Create appropriate queue
     if anchor_points is not None:
-        return AnchorPointsTaskQueue(tasks, anchor_points)
+        return DISCOQueue(tasks, anchor_points)
     else:
         return SequentialTaskQueue(tasks)
 

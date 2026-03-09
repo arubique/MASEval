@@ -10,7 +10,7 @@ The **MMLU Benchmark** evaluates language models on multiple-choice questions sp
 [MMLU](https://arxiv.org/abs/2009.03300) (Hendrycks et al., 2021) is a widely used benchmark for measuring knowledge and reasoning across diverse domains. The MASEval implementation features:
 
 - **Log-likelihood MCQ evaluation** matching lm-evaluation-harness methodology
-- **Anchor-point task selection** via `AnchorPointsTaskQueue` for DISCO-style subset evaluation
+- **Anchor-point task selection** via `DISCOQueue` for DISCO-style subset evaluation
 - **HuggingFace integration** with batched log-probability computation
 - **lm-eval compatibility** mode for exact numerical reproduction
 
@@ -88,7 +88,7 @@ tasks = load_tasks(
     anchor_points_path="/path/to/anchor_points.json",
 )
 
-# tasks is an AnchorPointsTaskQueue — only anchor tasks are evaluated
+# tasks is an DISCOQueue — only anchor tasks are evaluated
 print(f"Evaluating {len(tasks)} anchor tasks")
 ```
 

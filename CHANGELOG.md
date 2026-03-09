@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Core**
 
-- Added `AnchorPointsTaskQueue` to `maseval.core.task` for subset-based evaluation (e.g., anchor-point selection for DISCO). Available via `from maseval import AnchorPointsTaskQueue`. (PR: #34)
+- Added `DISCOQueue` to `maseval.core.task` for subset-based evaluation (e.g., anchor-point selection for DISCO). Available via `from maseval import DISCOQueue`. (PR: #34)
 - Added `SeedGenerator` abstract base class and `DefaultSeedGenerator` implementation for reproducible benchmark runs via SHA-256-based seed derivation (PR: #24)
 - Added `seed` and `seed_generator` parameters to `Benchmark.__init__` for enabling reproducibility (PR: #24)
 - Added `seed_generator` parameter to all benchmark setup methods (`setup_environment`, `setup_user`, `setup_agents`, `setup_evaluators`) (PR: #24)
@@ -88,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Benchmarks**
 
-- `MMLUBenchmark` no longer implements `setup_agents()` — consistent with other benchmarks, agent creation is left to concrete subclasses (e.g., `HuggingFaceMMLUBenchmark`). Removed silent `.get()` fallbacks for required fields (`gold`, `query`, `model_id`) so missing data surfaces errors immediately instead of failing silently. `AnchorPointsTaskQueue` moved from `maseval.benchmark.mmlu` to `maseval.core.task` and now extends `SequentialTaskQueue` instead of `AdaptiveTaskQueue`. Added `mmlu` optional extra (`pip install maseval[mmlu]`). (PR: #34)
+- `MMLUBenchmark` no longer implements `setup_agents()` — consistent with other benchmarks, agent creation is left to concrete subclasses (e.g., `HuggingFaceMMLUBenchmark`). Removed silent `.get()` fallbacks for required fields (`gold`, `query`, `model_id`) so missing data surfaces errors immediately instead of failing silently. `DISCOQueue` moved from `maseval.benchmark.mmlu` to `maseval.core.task` and now extends `SequentialTaskQueue` instead of `AdaptiveTaskQueue`. Added `mmlu` optional extra (`pip install maseval[mmlu]`). (PR: #34)
 - `MACSBenchmark` and `Tau2Benchmark` benchmarks now actively use the seeding system by deriving seeds for model adapters. Seeds are passed to agents, user simulators, tool simulators, and LLM-based evaluators for reproducible runs. (PR: #26)
   - `Gaia2Benchmark`: Seeds `agents/gaia2_agent`, `evaluators/judge`
   - `MACSBenchmark`: Seeds `environment/tools/tool_{name}`, `simulators/user`, `evaluators/user_gsr`, `evaluators/system_gsr`

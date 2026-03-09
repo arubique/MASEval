@@ -273,25 +273,72 @@ class SequentialTaskQueue(BaseTaskQueue):
         return iter(self._tasks)
 
 
-class AnchorPointsTaskQueue(SequentialTaskQueue):
-    """Task queue that evaluates a specified subset of tasks in a given order.
+class InformativeSubsetQueue(SequentialTaskQueue):
+    """Evaluates an informative subset of tasks in a specified order.
 
-    Used for anchor-point-based evaluation where performance on a full dataset
-    is predicted from results on a carefully selected subset. Anchor points are
-    integer indices into the original task list. Only tasks at those indices are
-    yielded, in the order specified by ``anchor_points``.
+    Used for efficient evaluation where a carefully selected subset of tasks
+    can predict performance on the full dataset. The subset is defined by
+    ``indices`` — integer positions into the original task list. Only tasks
+    at those positions are yielded, in the order given by ``indices``.
 
-    When ``anchor_points`` is ``None``, all tasks are yielded in their original order
-    (equivalent to ``SequentialTaskQueue``).
+    The informativeness criterion (how the indices were chosen) is determined
+    by the caller or by a subclass. This base class is criterion-agnostic.
+
+    When ``indices`` is ``None``, all tasks are yielded in their original
+    order (equivalent to ``SequentialTaskQueue``).
 
     Attributes:
         _all_tasks: The complete, unfiltered task list.
-        _anchor_points: The anchor-point indices, or ``None``.
+        _indices: The subset indices, or ``None``.
 
     Example:
         ```python
         # Evaluate only tasks at indices 0, 5, 12
-        queue = AnchorPointsTaskQueue(tasks, anchor_points=[0, 5, 12])
+        queue = InformativeSubsetQueue(tasks, indices=[0, 5, 12])
+
+        for task in queue:
+            result = execute(task)  # Only 3 tasks
+        ```
+    """
+
+    def __init__(self, tasks: Iterable[Task], indices: Optional[List[int]] = None) -> None:
+        """Initialize informative-subset task queue.
+
+        Args:
+            tasks: Full list of tasks (ordered by index).
+            indices: Positions into ``tasks`` selecting which tasks to evaluate
+                and in what order. If ``None``, evaluates all tasks in order.
+        """
+        all_tasks = list(tasks)
+        self._all_tasks: List[Task] = all_tasks
+        self._indices: Optional[List[int]] = indices
+
+        if indices is not None:
+            task_by_index: Dict[int, Task] = {i: task for i, task in enumerate(all_tasks)}
+            filtered = [task_by_index[idx] for idx in indices if idx in task_by_index]
+            super().__init__(filtered)
+        else:
+            super().__init__(all_tasks)
+
+
+class DISCOQueue(InformativeSubsetQueue):
+    """Diversity-based informative subset using DISCO anchor points.
+
+    Selects a diverse subset of tasks (anchor points) for evaluation. Full
+    benchmark performance is then predicted from results on this subset using
+    DISCO (DISCOvering key features for accurate prediction of LLM abilities
+    on benchmarks).
+
+    The informativeness criterion is **diversity**: anchor points are chosen
+    to maximise disagreement across models, so that a small evaluation set
+    captures the discriminative structure of the full benchmark.
+
+    Reference: `DISCO: DISCOvering key features for accurate prediction of
+    LLM abilities on benchmarks <https://arxiv.org/abs/2407.12890>`_
+
+    Example:
+        ```python
+        queue = DISCOQueue(tasks, anchor_points=[0, 5, 12])
 
         for task in queue:
             result = execute(task)  # Only 3 tasks
@@ -299,23 +346,17 @@ class AnchorPointsTaskQueue(SequentialTaskQueue):
     """
 
     def __init__(self, tasks: Iterable[Task], anchor_points: Optional[List[int]] = None) -> None:
-        """Initialize anchor-points task queue.
+        """Initialize DISCO task queue.
 
         Args:
             tasks: Full list of tasks (ordered by index).
-            anchor_points: Indices into ``tasks`` selecting which tasks to evaluate
-                and in what order. If ``None``, evaluates all tasks in order.
+            anchor_points: Diversity-selected indices into ``tasks``.
+                Typically loaded from a DISCO anchor-points file or
+                downloaded from a HuggingFace DISCO model repo.
+                If ``None``, evaluates all tasks in order.
         """
-        all_tasks = list(tasks)
-        self._all_tasks: List[Task] = all_tasks
         self._anchor_points: Optional[List[int]] = anchor_points
-
-        if anchor_points is not None:
-            task_by_index: Dict[int, Task] = {i: task for i, task in enumerate(all_tasks)}
-            filtered = [task_by_index[idx] for idx in anchor_points if idx in task_by_index]
-            super().__init__(filtered)
-        else:
-            super().__init__(all_tasks)
+        super().__init__(tasks, indices=anchor_points)
 
 
 class PriorityTaskQueue(BaseTaskQueue):

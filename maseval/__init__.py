@@ -16,7 +16,8 @@ from .core.task import (
     BaseTaskQueue,
     TaskQueue,
     SequentialTaskQueue,
-    AnchorPointsTaskQueue,
+    InformativeSubsetQueue,
+    DISCOQueue,
     PriorityTaskQueue,
     AdaptiveTaskQueue,
 )
@@ -94,7 +95,8 @@ __all__ = [
     "BaseTaskQueue",
     "TaskQueue",
     "SequentialTaskQueue",
-    "AnchorPointsTaskQueue",
+    "InformativeSubsetQueue",
+    "DISCOQueue",
     "PriorityTaskQueue",
     "AdaptiveTaskQueue",
     # Model adapters
