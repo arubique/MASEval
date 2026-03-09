@@ -82,10 +82,20 @@ multiagentbench = [
 ]
 tau2 = ["docstring-parser>=0.16", "addict>=2.4.0"]
 converse = []
-mmlu = []
+# HuggingFace model + tokenizer, default dataset download; numpy for example script and anchor-point loading;
+# lm-eval for --use_lmeval_batching (exact lm-evaluation-harness reproduction); aiohttp required by lm_eval.models.api_models
+mmlu = [
+    "transformers>=4.37.0",
+    "numpy>=1.20.0",
+    "aiohttp>=3.9.0",
+    "lm-eval @ git+https://github.com/arubique/lm-evaluation-harness.git@main",
+]
 
-# LM Evaluation Harness (for HuggingFaceMMLUBenchmark.precompute_all_logprobs_lmeval)
-lm-eval = ["lm-eval @ git+https://github.com/arubique/lm-evaluation-harness.git@main"]
+# LM Evaluation Harness (same as in mmlu; aiohttp required by lm_eval.models.api_models)
+lm-eval = [
+    "aiohttp>=3.9.0",
+    "lm-eval @ git+https://github.com/arubique/lm-evaluation-harness.git@main",
+]
 
 # DISCO prediction (for MMLU benchmark example)
 disco = [

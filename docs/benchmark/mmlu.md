@@ -18,16 +18,22 @@ Check out the [BENCHMARKS.md](https://github.com/parameterlab/MASEval/blob/main/
 
 ## Installation
 
-MMLU has an optional dependency extra (currently empty, as core MMLU requires no additional packages):
+Install MMLU with all dependencies needed to run the HuggingFace benchmark and example script:
 
 ```bash
 pip install maseval[mmlu]
 ```
 
-For the HuggingFace implementation, also install transformers:
+Or with uv:
 
 ```bash
-pip install maseval[mmlu,transformers]
+uv sync --extra mmlu
+```
+
+This installs `transformers`, `torch`, `numpy`, and `huggingface_hub` (the latter two via `transformers`). You can then run the example:
+
+```bash
+python examples/mmlu_benchmark/mmlu_benchmark.py --model_id alignment-handbook/zephyr-7b-sft-full
 ```
 
 For DISCO prediction support:
