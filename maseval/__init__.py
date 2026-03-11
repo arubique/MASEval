@@ -22,7 +22,7 @@ from .core.task import (
     AdaptiveTaskQueue,
 )
 from .core.environment import Environment
-from .core.agent import AgentAdapter
+from .core.agent import AgentAdapter, ModelAgentAdapter
 from .core.benchmark import Benchmark, TaskExecutionStatus
 from .core.callback_handler import CallbackHandler
 from .core.callback import BenchmarkCallback, EnvironmentCallback, AgentCallback
@@ -35,6 +35,7 @@ from .core.simulator import (
     UserSimulatorError,
 )
 from .core.model import ModelAdapter, ChatResponse
+from .core.scorer import ModelScorer
 from .core.user import User, LLMUser, AgenticLLMUser, TerminationReason
 from .core.evaluator import Evaluator
 from .core.history import MessageHistory, ToolInvocationHistory
@@ -63,6 +64,7 @@ __all__ = [
     # Core abstractions
     "Environment",
     "AgentAdapter",
+    "ModelAgentAdapter",
     "Benchmark",
     "TaskExecutionStatus",
     # Callbacks
@@ -99,9 +101,10 @@ __all__ = [
     "DISCOQueue",
     "PriorityTaskQueue",
     "AdaptiveTaskQueue",
-    # Model adapters
+    # Model adapters and scorers
     "ModelAdapter",
     "ChatResponse",
+    "ModelScorer",
     # Exceptions and validation
     "MASEvalError",
     "AgentError",

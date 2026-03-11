@@ -43,15 +43,13 @@ from maseval import (
     Benchmark,
     Environment,
     Evaluator,
-    MessageHistory,
     ModelAdapter,
+    ModelAgentAdapter,
     Task,
     User,
     SeedGenerator,
 )
 from maseval.core.task import SequentialTaskQueue
-from maseval.core.tracing import TraceableMixin
-from maseval.core.config import ConfigurableMixin
 
 
 # =============================================================================
@@ -230,103 +228,6 @@ class MMLUEvaluator(Evaluator):
 
 
 # =============================================================================
-# Model Adapter Wrapper for MCQ
-# =============================================================================
-
-
-class MMLUModelAgent(TraceableMixin, ConfigurableMixin):
-    """Simple agent wrapper that passes prompts to a model for MCQ evaluation.
-
-    This is a minimal agent that just forwards prompts to the model
-    and returns the response. It supports tracing for MASEval integration.
-    """
-
-    def __init__(self, model: ModelAdapter, name: str = DEFAULT_AGENT_NAME):
-        """Initialize MMLU model agent.
-
-        Args:
-            model: ModelAdapter to use for generation.
-            name: Agent name for tracing.
-        """
-        super().__init__()
-        self.model = model
-        self.name = name
-        self._messages: List[Dict[str, Any]] = []
-
-    def run(self, prompt: str) -> str:
-        """Run the model on a prompt.
-
-        Args:
-            prompt: The prompt to send to the model.
-
-        Returns:
-            Model's response string.
-        """
-        # Record input message
-        self._messages.append({"role": "user", "content": prompt})
-
-        # Generate response
-        response = self.model.generate(prompt)
-
-        # Record output message
-        self._messages.append({"role": "assistant", "content": response})
-
-        return response
-
-    def gather_traces(self) -> Dict[str, Any]:
-        """Gather traces for this agent."""
-        return {
-            **super().gather_traces(),
-            "name": self.name,
-            "messages": list(self._messages),
-        }
-
-    def gather_config(self) -> Dict[str, Any]:
-        """Gather configuration."""
-        return {
-            **super().gather_config(),
-            "name": self.name,
-            "model_id": self.model.model_id,
-        }
-
-
-class MMLUAgentAdapter(AgentAdapter):
-    """AgentAdapter wrapper for MMLUModelAgent."""
-
-    def __init__(self, agent: MMLUModelAgent, name: str):
-        """Initialize adapter.
-
-        Args:
-            agent: MMLUModelAgent instance.
-            name: Adapter name.
-        """
-        super().__init__(agent, name)
-
-    def _run_agent(self, query: str) -> Any:
-        """Execute the agent."""
-        return self.agent.run(query)
-
-    def get_messages(self) -> MessageHistory:
-        """Get agent messages."""
-        return MessageHistory(self.agent._messages)
-
-    def gather_traces(self) -> Dict[str, Any]:
-        """Gather execution traces from this agent."""
-        from maseval.core.tracing import TraceableMixin
-
-        messages = self.get_messages()
-        return {
-            **TraceableMixin.gather_traces(self),
-            "name": self.name,
-            "agent_type": type(self.agent).__name__,
-            "message_count": len(messages),
-            "messages": messages.to_list(),
-            "callbacks": [type(cb).__name__ for cb in self.callbacks],
-            "logs": self.logs,
-        }
-
-
-# =============================================================================
 # Benchmark
 # =============================================================================
 
@@ -435,12 +336,14 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
     """MMLU Benchmark using HuggingFace transformers models.
 
     This concrete implementation uses log-likelihood based MCQ evaluation
-    with the same optimizations as lm-evaluation-harness:
+    via ``HuggingFaceModelScorer``, with the same optimisations as
+    lm-evaluation-harness:
 
-    1. Single forward pass per question (one-token continuation optimization)
-    2. Batching multiple questions together
-    3. Efficient log-softmax computation
-    4. Proper left-padding for batch processing
+    1. Single forward pass per question (one-token continuation optimisation)
+    2. Efficient log-softmax computation
+    3. Proper left-padding for batch processing
+
+    Agents are created using the generic ``ModelAgentAdapter``.
     """
 
     def __init__(
@@ -459,16 +362,22 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
             device: Device to run model on.
             trust_remote_code: Trust remote code when loading model (default True).
             use_full_prompt: Use full prompt with few-shot examples (default True).
-            batch_size: Batch size for evaluation (number of questions per batch).
-            **kwargs: Additional arguments passed to MMLUBenchmark.
+            batch_size: Batch size for lm-eval batching (number of questions per batch).
+            **kwargs: Additional arguments passed to ``MMLUBenchmark``.
         """
         super().__init__(use_full_prompt=use_full_prompt, **kwargs)
         self._model_id = model_id
         self._device = device
         self._trust_remote_code = trust_remote_code
         self._batch_size = batch_size
-        self._model = None
-        self._tokenizer = None
+
+        from maseval.interface.inference.huggingface_scorer import HuggingFaceModelScorer
+
+        self._scorer = HuggingFaceModelScorer(
+            model_id=model_id,
+            device=device,
+            trust_remote_code=trust_remote_code,
+        )
 
     def setup_agents(
         self,
@@ -492,188 +401,8 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
         """
         model_id = agent_data["model_id"]
         model = self.get_model_adapter(model_id, register_name=DEFAULT_MODEL_REGISTER_NAME)
-
-        agent = MMLUModelAgent(model, name=DEFAULT_AGENT_NAME)
-        adapter = MMLUAgentAdapter(agent, DEFAULT_AGENT_NAME)
-
+        adapter = ModelAgentAdapter(model, DEFAULT_AGENT_NAME)
         return [adapter], {DEFAULT_AGENT_NAME: adapter}
-
-    def _load_model(self):
-        """Lazy load the model and tokenizer for log-likelihood computation."""
-        if self._model is None:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-
-            print(f"Loading model: {self._model_id}")
-            self._tokenizer = AutoTokenizer.from_pretrained(
-                self._model_id,
-                trust_remote_code=self._trust_remote_code,
-            )
-            self._tokenizer.padding_side = "left"
-            if self._tokenizer.pad_token is None:
-                self._tokenizer.pad_token = self._tokenizer.eos_token
-
-            # Load model with torch_dtype="auto" to match lm-evaluation-harness exactly
-            # This uses the model's native dtype (bfloat16 for most modern models)
-            # Then move to device manually
-            self._model = AutoModelForCausalLM.from_pretrained(
-                self._model_id,
-                trust_remote_code=self._trust_remote_code,
-                torch_dtype="auto",
-            )
-            self._model = self._model.to(self._device)
-            self._model.eval()
-
-            # Note: We don't pre-cache choice token IDs here because they depend on context.
-            # Token IDs are computed dynamically in _get_choice_token_id_in_context()
-            # to match lm-evaluation-harness behavior exactly.
-
-        return self._model, self._tokenizer
-
-    def _get_choice_token_id_separate(self, choice: str) -> Optional[int]:
-        """Get the token ID for a choice when tokenized SEPARATELY.
-
-        CRITICAL: lm-evaluation-harness encodes context and continuation separately,
-        then concatenates. This means "A" is always tokenized standalone (token 330),
-        NOT in context after "Answer:" (which would be token 28741).
-
-        We must match this behavior to get identical log-likelihood values.
-
-        Args:
-            choice: The choice string (e.g., "A").
-
-        Returns:
-            Token ID for the choice (standalone tokenization), or None if multi-token.
-        """
-        _, tokenizer = self._load_model()
-
-        # Tokenize choice ALONE (not in context) - this is how lm-eval does it
-        choice_tokens = tokenizer.encode(choice, add_special_tokens=False)
-
-        if len(choice_tokens) == 1:
-            return choice_tokens[0]
-        else:
-            # Multi-token choice - return None to trigger multi-token fallback
-            return None
-
-    def _encode_pair(self, context: str, continuation: str) -> tuple:
-        """Encode a context-continuation pair like lm-evaluation-harness.
-
-        This matches lm-eval's _encode_pair method exactly:
-        1. Encode whole = context + continuation
-        2. Encode context alone
-        3. continuation_enc = whole[len(context_enc):]
-
-        This handles tokenization boundary effects correctly.
-
-        Args:
-            context: The context/prompt string.
-            continuation: The continuation string (e.g., " A" with target_delimiter).
-
-        Returns:
-            Tuple of (context_enc, continuation_enc) token lists.
-        """
-        _, tokenizer = self._load_model()
-
-        # Handle trailing spaces in context (move to continuation)
-        n_spaces = len(context) - len(context.rstrip())
-        if n_spaces > 0:
-            continuation = context[-n_spaces:] + continuation
-            context = context[:-n_spaces]
-
-        # Encode whole string together, then split
-        whole_enc = tokenizer.encode(context + continuation, add_special_tokens=True)
-        context_enc = tokenizer.encode(context, add_special_tokens=True)
-
-        # Continuation tokens are what's left after context
-        continuation_enc = whole_enc[len(context_enc) :]
-
-        return context_enc, continuation_enc
-
-    def _compute_logprobs_single_token(self, prompt: str, choices: list) -> list:
-        """Compute log-likelihoods using single-token optimization.
-
-        For MCQ with single-letter answers (A, B, C, D), we can compute all
-        choices in one forward pass since they share the same context.
-
-        IMPORTANT: To match lm-evaluation-harness EXACTLY:
-        1. Use target_delimiter=" " before choices (e.g., " A" not "A")
-        2. Use _encode_pair to handle tokenization boundaries correctly
-        3. Input = (context + continuation)[:-1]
-        4. Apply log_softmax to get log probabilities
-
-        Args:
-            prompt: The prompt/question text.
-            choices: List of answer choice strings (e.g., ["A", "B", "C", "D"]).
-
-        Returns:
-            List of log-likelihoods, one per choice.
-        """
-        import torch
-
-        model, _ = self._load_model()
-
-        # lm-eval uses target_delimiter=" " for multiple choice tasks
-        target_delimiter = TARGET_DELIMITER
-
-        # Encode first choice to get the shared context
-        first_continuation = f"{target_delimiter}{choices[0]}"
-        context_enc, first_cont_enc = self._encode_pair(prompt, first_continuation)
-
-        # Build input: (context + continuation)[:-1]
-        full_sequence = context_enc + first_cont_enc
-        input_tokens = full_sequence[:-1]  # Remove last token
-
-        input_ids = torch.tensor([input_tokens], dtype=torch.long, device=self._device)
-
-        with torch.no_grad():
-            outputs = model(input_ids)
-            logits = outputs.logits[0]  # (seq_len, vocab_size)
-
-            # Select logits at position where continuation is predicted
-            # For single-token continuation, this is the last position
-            inplen = len(input_tokens)
-            contlen = len(first_cont_enc)
-            selected_logits = logits[inplen - contlen : inplen]
-
-            # Compute log-softmax
-            log_probs = torch.nn.functional.log_softmax(selected_logits, dim=-1)
-
-            # Get log prob for each choice's continuation token
-            logprobs = []
-            for choice in choices:
-                continuation = f"{target_delimiter}{choice}"
-                _, cont_enc = self._encode_pair(prompt, continuation)
-
-                # Sum log probs for multi-token continuations
-                total = 0.0
-                for i, token_id in enumerate(cont_enc):
-                    total += log_probs[i, token_id].item()
-                logprobs.append(total)
-
-        return logprobs
-
-    def _compute_logprobs_batched(self, prompts: list, choices_list: list) -> list:
-        """Compute log-likelihoods for a batch of prompts.
-
-        For exact match with lm-evaluation-harness, we process each prompt
-        individually using _compute_logprobs_single_token which uses the
-        correct _encode_pair tokenization logic.
-
-        Args:
-            prompts: List of prompt strings.
-            choices_list: List of choice lists (one per prompt).
-
-        Returns:
-            List of log-likelihood lists, one per prompt.
-        """
-        # For exact match with lm-eval, process individually
-        # This ensures correct tokenization via _encode_pair
-        all_logprobs = []
-        for prompt, choices in zip(prompts, choices_list):
-            logprobs = self._compute_logprobs_single_token(prompt, choices)
-            all_logprobs.append(logprobs)
-
-        return all_logprobs
 
     def precompute_all_logprobs_lmeval(self, tasks: Sequence[Task]) -> Dict[Any, List[float]]:
         """Precompute log-likelihoods for ALL tasks using lm-eval's batching.
@@ -755,60 +484,6 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
 
         return doc_logprobs
 
-    def _compute_logprobs_multi_token(self, prompt: str, choices: list) -> list:
-        """Compute log-likelihoods for multi-token continuations.
-
-        This is the fallback for when answer choices have multiple tokens.
-        Uses _encode_pair to match lm-evaluation-harness exactly.
-
-        Args:
-            prompt: The prompt/question text.
-            choices: List of answer choice strings.
-
-        Returns:
-            List of log-likelihoods, one per choice.
-        """
-        import torch
-
-        model, _ = self._load_model()
-
-        # lm-eval uses target_delimiter=" " for multiple choice tasks
-        target_delimiter = TARGET_DELIMITER
-
-        all_logprobs = []
-        for choice in choices:
-            continuation = f"{target_delimiter}{choice}"
-
-            # Use _encode_pair for correct tokenization
-            context_enc, continuation_enc = self._encode_pair(prompt, continuation)
-
-            # Build input: (context + continuation)[:-1]
-            full_sequence = context_enc + continuation_enc
-            input_tokens = full_sequence[:-1]
-
-            input_ids = torch.tensor([input_tokens], dtype=torch.long, device=self._device)
-
-            with torch.no_grad():
-                outputs = model(input_ids)
-                logits = outputs.logits[0]  # (seq_len, vocab_size)
-
-                # Select continuation logits
-                inplen = len(input_tokens)
-                contlen = len(continuation_enc)
-                selected = logits[inplen - contlen : inplen]
-
-                # Compute log-softmax
-                log_probs = torch.nn.functional.log_softmax(selected, dim=-1)
-
-                # Sum log probs for all continuation tokens
-                total = 0.0
-                for i, token_id in enumerate(continuation_enc):
-                    total += log_probs[i, token_id].item()
-
-                all_logprobs.append(total)
-
-        return all_logprobs
-
     def run_agents(
         self,
         agents: Sequence[AgentAdapter],
@@ -819,111 +494,62 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
         """Execute log-likelihood based MCQ evaluation.
 
         Uses precomputed logprobs if available (for exact lm-eval match),
-        otherwise falls back to single-forward-pass optimization for
-        single-token answers, or multi-token batched computation.
+        otherwise delegates to ``HuggingFaceModelScorer.loglikelihood_choices()``
+        which automatically picks single-token or multi-token scoring.
         """
-        # Get the prompt from environment
         prompt = environment.get_prompt()
         choices = environment.state.get("choices", DEFAULT_CHOICES)
         doc_id = task.metadata.get("doc_id") if task else None
 
-        # Check if we have precomputed logprobs (for exact lm-eval match)
         if hasattr(self, "_precomputed_logprobs") and doc_id is not None:
             logprobs = self._precomputed_logprobs.get(doc_id)
             if logprobs is not None:
-                # Use precomputed values for exact match
                 best_idx = logprobs.index(max(logprobs))
                 answer = choices[best_idx]
-
-                # Store logprobs in environment for later retrieval
                 environment.state["logprobs"] = logprobs
                 environment.state["predicted_idx"] = best_idx
-
-                # Record in agent messages for tracing
                 agent = agents[0]
-                agent.agent._messages.append({"role": "user", "content": prompt})
-                agent.agent._messages.append(
-                    {
-                        "role": "assistant",
-                        "content": answer,
-                        "logprobs": logprobs,
-                    }
-                )
-
+                agent._messages.append({"role": "user", "content": prompt})
+                agent._messages.append({"role": "assistant", "content": answer, "logprobs": logprobs})
                 return answer
 
-        # Fall back to computing logprobs on-the-fly
-        # Load model
-        self._load_model()
+        logprobs = self._scorer.loglikelihood_choices(prompt, choices, delimiter=TARGET_DELIMITER)
 
-        # lm-eval uses target_delimiter=" " for multiple choice tasks
-        target_delimiter = TARGET_DELIMITER
-
-        # Check if all choices result in single-token continuations
-        # using _encode_pair to get the correct tokenization
-        all_single_token = True
-        for choice in choices:
-            continuation = f"{target_delimiter}{choice}"
-            _, cont_enc = self._encode_pair(prompt, continuation)
-            if len(cont_enc) != 1:
-                all_single_token = False
-                break
-
-        if all_single_token:
-            # Use optimized single-token path (one forward pass)
-            logprobs = self._compute_logprobs_single_token(prompt, choices)
-        else:
-            # Fall back to multi-token computation
-            logprobs = self._compute_logprobs_multi_token(prompt, choices)
-
-        # Select the choice with highest log-probability
         best_idx = logprobs.index(max(logprobs))
         answer = choices[best_idx]
-
-        # Store logprobs in environment for later retrieval if needed
         environment.state["logprobs"] = logprobs
         environment.state["predicted_idx"] = best_idx
 
-        # Record in agent messages for tracing
         agent = agents[0]
-        agent.agent._messages.append({"role": "user", "content": prompt})
-        agent.agent._messages.append(
-            {
-                "role": "assistant",
-                "content": answer,
-                "logprobs": logprobs,
-            }
-        )
-
+        agent._messages.append({"role": "user", "content": prompt})
+        agent._messages.append({"role": "assistant", "content": answer, "logprobs": logprobs})
         return answer
 
     def get_model_adapter(self, model_id: str, **kwargs: Any) -> ModelAdapter:
-        """Provide a HuggingFace ModelAdapter.
+        """Provide a HuggingFace ``ModelAdapter``.
 
-        Note: For logprobs-based evaluation, we don't actually use the adapter
-        for generation. This is kept for API compatibility.
+        The returned adapter is a placeholder — actual evaluation uses
+        ``HuggingFaceModelScorer`` for log-likelihood scoring. The adapter
+        is required by the ``Benchmark`` contract for ``setup_agents()``.
 
         Args:
             model_id: Model identifier (ignored, uses instance model_id).
-            **kwargs: Additional arguments (e.g., register_name).
+            **kwargs: Additional arguments (e.g., ``register_name``).
 
         Returns:
-            ``HuggingFaceModelAdapter`` instance.
+            ``HuggingFacePipelineModelAdapter`` instance.
         """
-        from maseval.interface.inference import HuggingFaceModelAdapter
+        from maseval.interface.inference import HuggingFacePipelineModelAdapter
 
-        # Create a minimal adapter for compatibility
-        # The actual evaluation uses _compute_logprobs_*
-        class DummyCallable:
-            def __call__(self, prompt, **kwargs):
+        class _DummyCallable:
+            def __call__(self, prompt: str, **kw: Any) -> str:
                 return ""
 
-        adapter = HuggingFaceModelAdapter(
-            model=DummyCallable(),
+        adapter = HuggingFacePipelineModelAdapter(
+            model=_DummyCallable(),
             model_id=self._model_id,
         )
 
-        # Register for tracing if requested
         register_name = kwargs.get("register_name")
         if register_name:
             self.register("models", register_name, adapter)

@@ -97,13 +97,13 @@ print(f"Evaluating {len(tasks)} anchor tasks")
 `MMLUBenchmark` is a framework-agnostic base class. To use a different model backend, subclass it and implement `setup_agents()` and `get_model_adapter()`:
 
 ```python
-from maseval.benchmark.mmlu import MMLUBenchmark, MMLUModelAgent, MMLUAgentAdapter
+from maseval import ModelAgentAdapter
+from maseval.benchmark.mmlu import MMLUBenchmark
 
 class MyMMLUBenchmark(MMLUBenchmark):
     def setup_agents(self, agent_data, environment, task, user, seed_generator):
         model = self.get_model_adapter(agent_data["model_id"])
-        agent = MMLUModelAgent(model, name="mmlu_agent")
-        adapter = MMLUAgentAdapter(agent, "mmlu_agent")
+        adapter = ModelAgentAdapter(model, name="mmlu_agent")
         return [adapter], {"mmlu_agent": adapter}
 
     def get_model_adapter(self, model_id, **kwargs):
@@ -123,10 +123,6 @@ class MyMMLUBenchmark(MMLUBenchmark):
 ::: maseval.benchmark.mmlu.MMLUEnvironment
 
 ::: maseval.benchmark.mmlu.MMLUEvaluator
-
-::: maseval.benchmark.mmlu.MMLUModelAgent
-
-::: maseval.benchmark.mmlu.MMLUAgentAdapter
 
 ::: maseval.benchmark.mmlu.load_tasks
 

@@ -36,8 +36,6 @@ from .mmlu import (
     DefaultMMLUBenchmark,
     MMLUEnvironment,
     MMLUEvaluator,
-    MMLUModelAgent,
-    MMLUAgentAdapter,
     load_tasks,
     compute_benchmark_metrics,
 )
@@ -56,8 +54,6 @@ __all__ = [
     "DefaultMMLUBenchmark",
     "MMLUEnvironment",
     "MMLUEvaluator",
-    "MMLUModelAgent",
-    "MMLUAgentAdapter",
     "InformativeSubsetQueue",
     "DISCOQueue",
     "load_tasks",

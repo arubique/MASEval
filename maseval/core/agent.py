@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import List, Any, Optional, Dict
+from typing import TYPE_CHECKING, List, Any, Optional, Dict
 
 from .callback import AgentCallback
 from .history import MessageHistory
 from .tracing import TraceableMixin
 from .config import ConfigurableMixin
+
+if TYPE_CHECKING:
+    from .model import ModelAdapter
 
 
 class AgentAdapter(ABC, TraceableMixin, ConfigurableMixin):
@@ -186,3 +191,72 @@ class AgentAdapter(ABC, TraceableMixin, ConfigurableMixin):
 
     def __repr__(self):
         return f"AgentAdapter(name={self.name}, agent_type={type(self.agent).__name__})"
+
+
+class ModelAgentAdapter(AgentAdapter):
+    """Wraps a ``ModelAdapter`` as an ``AgentAdapter`` for direct model evaluation.
+
+    Use this when a benchmark needs to plug a model directly into the agent
+    slot without an agentic framework. The adapter forwards queries to
+    ``ModelAdapter.generate()`` and records the conversation for tracing.
+
+    Example:
+        ```python
+        from maseval import ModelAgentAdapter
+        from maseval.interface.inference import LiteLLMModelAdapter
+
+        model = LiteLLMModelAdapter(model_id="gpt-4")
+        agent = ModelAgentAdapter(model, name="evaluator")
+        result = agent.run("What is the capital of France?")
+        ```
+    """
+
+    def __init__(
+        self,
+        model: ModelAdapter,
+        name: str,
+        callbacks: Optional[List[AgentCallback]] = None,
+    ):
+        """Initialize a model-backed agent adapter.
+
+        Args:
+            model: ``ModelAdapter`` instance used for generation.
+            name: Agent name for tracing and identification.
+            callbacks: Optional agent callbacks.
+        """
+        super().__init__(model, name, callbacks)
+        self._messages: List[Dict[str, Any]] = []
+
+    @property
+    def model(self) -> ModelAdapter:
+        """The underlying ``ModelAdapter``."""
+        return self.agent
+
+    def _run_agent(self, query: str) -> str:
+        """Generate a response by forwarding the query to the model.
+
+        Args:
+            query: The prompt to send to the model.
+
+        Returns:
+            The model's text response.
+        """
+        self._messages.append({"role": "user", "content": query})
+        response = self.agent.generate(query)
+        self._messages.append({"role": "assistant", "content": response})
+        return response
+
+    def get_messages(self) -> MessageHistory:
+        """Return the recorded conversation history."""
+        return MessageHistory(self._messages)
+
+    def gather_config(self) -> Dict[str, Any]:
+        """Gather configuration including model identifier.
+
+        Returns:
+            Dictionary containing agent and model configuration.
+        """
+        return {
+            **super().gather_config(),
+            "model_id": self.agent.model_id,
+        }

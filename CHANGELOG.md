@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Benchmarks**
 
-- MMLU Benchmark with DISCO support: Integration for evaluating language models on MMLU (Massive Multitask Language Understanding) multiple-choice questions, compatible with DISCO anchor-point methodology. Includes `MMLUBenchmark`, `DefaultMMLUBenchmark`, `MMLUEnvironment`, `MMLUEvaluator`, `MMLUModelAgent`, `MMLUAgentAdapter`, `load_tasks()`, and `compute_benchmark_metrics()`. Install with `pip install maseval[mmlu]`. Optional extras: `lm-eval` (for `DefaultMMLUBenchmark.precompute_all_logprobs_lmeval`), `disco` (for DISCO prediction in the example). (PR: #34)
+- MMLU Benchmark with DISCO support: Integration for evaluating language models on MMLU (Massive Multitask Language Understanding) multiple-choice questions, compatible with DISCO anchor-point methodology. Includes `MMLUBenchmark`, `DefaultMMLUBenchmark`, `MMLUEnvironment`, `MMLUEvaluator`, `load_tasks()`, and `compute_benchmark_metrics()`. Install with `pip install maseval[mmlu]`. Optional extras: `lm-eval` (for `DefaultMMLUBenchmark.precompute_all_logprobs_lmeval`), `disco` (for DISCO prediction in the example). (PR: #34)
 
 - CONVERSE benchmark for contextual safety evaluation in adversarial agent-to-agent conversations, including `ConverseBenchmark`, `DefaultAgentConverseBenchmark`, `ConverseEnvironment`, `ConverseExternalAgent`, `PrivacyEvaluator`, `SecurityEvaluator`, and `load_tasks()` utilities for `travel`, `real_estate`, and `insurance` domains. Benchmark source files are now downloaded on first use via `ensure_data_exists()` instead of being bundled in the package. (PR: #28)
 
@@ -42,15 +42,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Core**
 
 - Added `DISCOQueue` to `maseval.core.task` for subset-based evaluation (e.g., anchor-point selection for DISCO). Available via `from maseval import DISCOQueue`. (PR: #34)
+- Added `ModelScorer` abstract base class in `maseval.core.scorer` for log-likelihood scoring, with `loglikelihood()`, `loglikelihood_batch()`, and `loglikelihood_choices()` methods. (PR: #PR_NUMBER_PLACEHOLDER)
+- Added `ModelAgentAdapter` in `maseval.core.agent` — a generic adapter that wraps any `ModelAdapter` as an `AgentAdapter` for direct model evaluation (replaces benchmark-specific agent wrappers). (PR: #PR_NUMBER_PLACEHOLDER)
 - Added `SeedGenerator` abstract base class and `DefaultSeedGenerator` implementation for reproducible benchmark runs via SHA-256-based seed derivation (PR: #24)
 - Added `seed` and `seed_generator` parameters to `Benchmark.__init__` for enabling reproducibility (PR: #24)
 - Added `seed_generator` parameter to all benchmark setup methods (`setup_environment`, `setup_user`, `setup_agents`, `setup_evaluators`) (PR: #24)
 - Added `seed` parameter to `ModelAdapter.__init__` for deterministic model inference (PR: #24)
 - Added `SeedingError` exception for providers that don't support seeding (Anthropic models raise this if seed is provided) (PR: #24)
-- Added seed support to interface adapters: `OpenAIModelAdapter`, `GoogleGenAIModelAdapter`, `LiteLLMModelAdapter`, `HuggingFaceModelAdapter` pass seeds to underlying APIs (PR: #24)
+- Added seed support to interface adapters: `OpenAIModelAdapter`, `GoogleGenAIModelAdapter`, `LiteLLMModelAdapter`, `HuggingFacePipelineModelAdapter` pass seeds to underlying APIs (PR: #24)
 - Added `UserExhaustedError` exception in `maseval.core.exceptions` for flow control when a user's turns are exhausted (PR: #39)
 
 **Interface**
+
+- Added `HuggingFaceModelScorer` in `maseval.interface.inference` — log-likelihood scorer backed by a HuggingFace `AutoModelForCausalLM`, with single-token optimisation for MCQ evaluation. Implements the `ModelScorer` interface. (PR: #PR_NUMBER_PLACEHOLDER)
+- Renamed `HuggingFaceModelAdapter` → `HuggingFacePipelineModelAdapter` to distinguish it from the new scorer. The old name remains as a backwards-compatible alias. (PR: #PR_NUMBER_PLACEHOLDER)
 
 - CAMEL-AI integration: `CamelAgentAdapter` and `CamelLLMUser` for evaluating CAMEL-AI ChatAgent-based systems (PR: #22)
   - Added `CamelAgentUser` for using a CAMEL ChatAgent as the user in agent-to-agent evaluation (PR: #22)
@@ -88,7 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Benchmarks**
 
-- `MMLUBenchmark` no longer implements `setup_agents()` — consistent with other benchmarks, agent creation is left to concrete subclasses (e.g., `DefaultMMLUBenchmark`). Removed silent `.get()` fallbacks for required fields (`gold`, `query`, `model_id`) so missing data surfaces errors immediately instead of failing silently. `DISCOQueue` moved from `maseval.benchmark.mmlu` to `maseval.core.task` and now extends `SequentialTaskQueue` instead of `AdaptiveTaskQueue`. Added `mmlu` optional extra (`pip install maseval[mmlu]`). (PR: #34)
+- `MMLUBenchmark` no longer implements `setup_agents()` — consistent with other benchmarks, agent creation is left to concrete subclasses (e.g., `DefaultMMLUBenchmark`). Removed silent `.get()` fallbacks for required fields (`gold`, `query`, `model_id`) so missing data surfaces errors immediately instead of failing silently. `DISCOQueue` moved from `maseval.benchmark.mmlu` to `maseval.core.task` and now extends `SequentialTaskQueue` instead of `AdaptiveTaskQueue`. Added `mmlu` optional extra (`pip install maseval[mmlu]`). `DefaultMMLUBenchmark` now delegates log-likelihood computation to `HuggingFaceModelScorer` and uses `ModelAgentAdapter` instead of the MMLU-specific `MMLUModelAgent`/`MMLUAgentAdapter` (removed). (PR: #34)
 - `MACSBenchmark` and `Tau2Benchmark` benchmarks now actively use the seeding system by deriving seeds for model adapters. Seeds are passed to agents, user simulators, tool simulators, and LLM-based evaluators for reproducible runs. (PR: #26)
   - `Gaia2Benchmark`: Seeds `agents/gaia2_agent`, `evaluators/judge`
   - `MACSBenchmark`: Seeds `environment/tools/tool_{name}`, `simulators/user`, `evaluators/user_gsr`, `evaluators/system_gsr`

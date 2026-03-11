@@ -155,7 +155,7 @@ class ModelAdapter(ABC, TraceableMixin, ConfigurableMixin):
     See maseval.interface.inference for concrete implementations:
         - AnthropicModelAdapter
         - GoogleGenAIModelAdapter
-        - HuggingFaceModelAdapter
+        - HuggingFacePipelineModelAdapter (alias: HuggingFaceModelAdapter)
         - LiteLLMModelAdapter
         - OpenAIModelAdapter
 
