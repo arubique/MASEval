@@ -1235,6 +1235,11 @@ class Benchmark(ABC):
             "traces": execution_traces,
             "config": execution_configs,
             "eval": eval_results,
+            "task": {
+                "query": task.query,
+                "metadata": dict(task.metadata),
+                "protocol": task.protocol.to_dict(),
+            },
         }
 
         # Clear registry after task repetition completes

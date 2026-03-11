@@ -174,6 +174,43 @@ class TestResultLogger:
         assert filtered["status"] is None
         assert filtered["error"] is None
 
+    def test_filter_report_includes_task_when_enabled(self):
+        """Test that task data is included in filtered report when include_task is True."""
+        logger = MockResultLogger(include_task=True)
+
+        report = {
+            "task_id": "task_0",
+            "repeat_idx": 0,
+            "traces": {},
+            "config": {},
+            "eval": {},
+            "task": {
+                "query": "What is 2+2?",
+                "metadata": {"difficulty": "easy"},
+                "protocol": {"timeout_seconds": None, "timeout_action": "skip", "max_retries": 0, "priority": 0, "tags": {}},
+            },
+        }
+
+        filtered = logger._filter_report(report)
+
+        assert "task" in filtered
+        assert filtered["task"]["query"] == "What is 2+2?"
+        assert filtered["task"]["metadata"] == {"difficulty": "easy"}
+
+    def test_filter_report_excludes_task_by_default(self):
+        """Test that task data is excluded from filtered report by default."""
+        logger = MockResultLogger()
+
+        report = {
+            "task_id": "task_0",
+            "repeat_idx": 0,
+            "task": {"query": "What is 2+2?", "metadata": {}, "protocol": {}},
+        }
+
+        filtered = logger._filter_report(report)
+
+        assert "task" not in filtered
+
     def test_filter_report_partial_included(self):
         """Test report filtering with only some fields included."""
         logger = MockResultLogger(include_traces=False, include_config=True, include_eval=False)

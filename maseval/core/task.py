@@ -52,6 +52,20 @@ class TaskProtocol:
     priority: int = 0
     tags: Dict[str, Any] = field(default_factory=dict)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to a JSON-serializable dictionary.
+
+        Returns:
+            Dictionary with all fields. Enum values are converted to strings.
+        """
+        return {
+            "timeout_seconds": self.timeout_seconds,
+            "timeout_action": self.timeout_action.value,
+            "max_retries": self.max_retries,
+            "priority": self.priority,
+            "tags": dict(self.tags),
+        }
+
 
 class FrozenDict(dict):
     """A dict subclass that raises ``TaskFrozenError`` on any mutation attempt.
