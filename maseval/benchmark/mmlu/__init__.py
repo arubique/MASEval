@@ -4,7 +4,7 @@ Implements MMLU evaluation with anchor point-based task selection for DISCO pred
 
 Usage:
     from maseval.benchmark.mmlu import (
-        HuggingFaceMMLUBenchmark,
+        DefaultMMLUBenchmark,
         load_tasks,
     )
     from maseval import DISCOQueue, InformativeSubsetQueue
@@ -16,7 +16,7 @@ Usage:
     )
 
     # Run benchmark
-    benchmark = HuggingFaceMMLUBenchmark(model_id="meta-llama/Llama-2-7b-hf")
+    benchmark = DefaultMMLUBenchmark(model_id="meta-llama/Llama-2-7b-hf")
     results = benchmark.run(tasks=tasks, agent_data={"model_id": "meta-llama/Llama-2-7b-hf"})
 """
 
@@ -33,7 +33,7 @@ from .mmlu import (
     TARGET_DELIMITER,
     TASK_TYPE_MMLU,
     MMLUBenchmark,
-    HuggingFaceMMLUBenchmark,
+    DefaultMMLUBenchmark,
     MMLUEnvironment,
     MMLUEvaluator,
     MMLUModelAgent,
@@ -53,7 +53,7 @@ __all__ = [
     "TARGET_DELIMITER",
     "TASK_TYPE_MMLU",
     "MMLUBenchmark",
-    "HuggingFaceMMLUBenchmark",
+    "DefaultMMLUBenchmark",
     "MMLUEnvironment",
     "MMLUEvaluator",
     "MMLUModelAgent",

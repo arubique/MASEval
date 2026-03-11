@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Benchmarks**
 
-- MMLU Benchmark with DISCO support: Integration for evaluating language models on MMLU (Massive Multitask Language Understanding) multiple-choice questions, compatible with DISCO anchor-point methodology. Includes `MMLUBenchmark`, `HuggingFaceMMLUBenchmark`, `MMLUEnvironment`, `MMLUEvaluator`, `MMLUModelAgent`, `MMLUAgentAdapter`, `load_tasks()`, and `compute_benchmark_metrics()`. Install with `pip install maseval[mmlu]`. Optional extras: `lm-eval` (for `HuggingFaceMMLUBenchmark.precompute_all_logprobs_lmeval`), `disco` (for DISCO prediction in the example). (PR: #34)
+- MMLU Benchmark with DISCO support: Integration for evaluating language models on MMLU (Massive Multitask Language Understanding) multiple-choice questions, compatible with DISCO anchor-point methodology. Includes `MMLUBenchmark`, `DefaultMMLUBenchmark`, `MMLUEnvironment`, `MMLUEvaluator`, `MMLUModelAgent`, `MMLUAgentAdapter`, `load_tasks()`, and `compute_benchmark_metrics()`. Install with `pip install maseval[mmlu]`. Optional extras: `lm-eval` (for `DefaultMMLUBenchmark.precompute_all_logprobs_lmeval`), `disco` (for DISCO prediction in the example). (PR: #34)
 
 - CONVERSE benchmark for contextual safety evaluation in adversarial agent-to-agent conversations, including `ConverseBenchmark`, `DefaultAgentConverseBenchmark`, `ConverseEnvironment`, `ConverseExternalAgent`, `PrivacyEvaluator`, `SecurityEvaluator`, and `load_tasks()` utilities for `travel`, `real_estate`, and `insurance` domains. Benchmark source files are now downloaded on first use via `ensure_data_exists()` instead of being bundled in the package. (PR: #28)
 
@@ -88,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Benchmarks**
 
-- `MMLUBenchmark` no longer implements `setup_agents()` — consistent with other benchmarks, agent creation is left to concrete subclasses (e.g., `HuggingFaceMMLUBenchmark`). Removed silent `.get()` fallbacks for required fields (`gold`, `query`, `model_id`) so missing data surfaces errors immediately instead of failing silently. `DISCOQueue` moved from `maseval.benchmark.mmlu` to `maseval.core.task` and now extends `SequentialTaskQueue` instead of `AdaptiveTaskQueue`. Added `mmlu` optional extra (`pip install maseval[mmlu]`). (PR: #34)
+- `MMLUBenchmark` no longer implements `setup_agents()` — consistent with other benchmarks, agent creation is left to concrete subclasses (e.g., `DefaultMMLUBenchmark`). Removed silent `.get()` fallbacks for required fields (`gold`, `query`, `model_id`) so missing data surfaces errors immediately instead of failing silently. `DISCOQueue` moved from `maseval.benchmark.mmlu` to `maseval.core.task` and now extends `SequentialTaskQueue` instead of `AdaptiveTaskQueue`. Added `mmlu` optional extra (`pip install maseval[mmlu]`). (PR: #34)
 - `MACSBenchmark` and `Tau2Benchmark` benchmarks now actively use the seeding system by deriving seeds for model adapters. Seeds are passed to agents, user simulators, tool simulators, and LLM-based evaluators for reproducible runs. (PR: #26)
   - `Gaia2Benchmark`: Seeds `agents/gaia2_agent`, `evaluators/judge`
   - `MACSBenchmark`: Seeds `environment/tools/tool_{name}`, `simulators/user`, `evaluators/user_gsr`, `evaluators/system_gsr`

@@ -52,7 +52,7 @@ pip install maseval[lm-eval]
 
 ```python
 from maseval.benchmark.mmlu import (
-    HuggingFaceMMLUBenchmark,
+    DefaultMMLUBenchmark,
     load_tasks,
     compute_benchmark_metrics,
 )
@@ -61,7 +61,7 @@ from maseval.benchmark.mmlu import (
 tasks = load_tasks(data_path="/path/to/mmlu_prompts_examples.json")
 
 # Create benchmark with HuggingFace model
-benchmark = HuggingFaceMMLUBenchmark(
+benchmark = DefaultMMLUBenchmark(
     model_id="meta-llama/Llama-2-7b-hf",
     device="cuda:0",
 )
@@ -118,7 +118,7 @@ class MyMMLUBenchmark(MMLUBenchmark):
 
 ::: maseval.benchmark.mmlu.MMLUBenchmark
 
-::: maseval.benchmark.mmlu.HuggingFaceMMLUBenchmark
+::: maseval.benchmark.mmlu.DefaultMMLUBenchmark
 
 ::: maseval.benchmark.mmlu.MMLUEnvironment
 

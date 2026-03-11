@@ -8,7 +8,7 @@ Dataset: MMLU (Massive Multitask Language Understanding)
 
 Usage:
     from maseval.benchmark.mmlu import (
-        HuggingFaceMMLUBenchmark, load_tasks,
+        DefaultMMLUBenchmark, load_tasks,
     )
     from maseval import DISCOQueue
 
@@ -19,7 +19,7 @@ Usage:
     )
 
     # Run with the HuggingFace concrete implementation
-    benchmark = HuggingFaceMMLUBenchmark(model_id="meta-llama/Llama-2-7b-hf")
+    benchmark = DefaultMMLUBenchmark(model_id="meta-llama/Llama-2-7b-hf")
     results = benchmark.run(tasks=tasks, agent_data={"model_id": "meta-llama/Llama-2-7b-hf"})
 """
 
@@ -342,7 +342,7 @@ class MMLUBenchmark(Benchmark):
     - ``setup_agents()`` - create agents for MCQ evaluation
     - ``get_model_adapter()`` - provide model adapters
 
-    For a ready-to-use implementation, see ``HuggingFaceMMLUBenchmark``.
+    For a ready-to-use implementation, see ``DefaultMMLUBenchmark``.
     """
 
     def __init__(
@@ -431,7 +431,7 @@ class MMLUBenchmark(Benchmark):
         return results
 
 
-class HuggingFaceMMLUBenchmark(MMLUBenchmark):
+class DefaultMMLUBenchmark(MMLUBenchmark):
     """MMLU Benchmark using HuggingFace transformers models.
 
     This concrete implementation uses log-likelihood based MCQ evaluation
