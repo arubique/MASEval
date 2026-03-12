@@ -84,14 +84,14 @@ class MMLUEnvironment(Environment):
 
         Args:
             task_data: Must contain ``"query"`` (str) and ``"environment_data"``
-                (dict with optional ``"choices"``, ``"full_prompt"``, ``"use_full_prompt"``).
+                (dict with ``"choices"``, ``"full_prompt"``, ``"use_full_prompt"``).
         """
         env_data = task_data["environment_data"]
         return {
             "query": task_data["query"],
-            "choices": env_data.get("choices", DEFAULT_CHOICES),
-            "full_prompt": env_data.get("full_prompt", ""),
-            "use_full_prompt": env_data.get("use_full_prompt", False),
+            "choices": env_data["choices"],
+            "full_prompt": env_data["full_prompt"],
+            "use_full_prompt": env_data["use_full_prompt"],
         }
 
     def create_tools(self) -> Dict[str, Any]:
@@ -137,7 +137,7 @@ class MMLUEvaluator(Evaluator):
         self.task = task
         self.environment = environment
         self.gold = task.evaluation_data["gold"]
-        self.choices = task.environment_data.get("choices", DEFAULT_CHOICES)
+        self.choices = task.environment_data["choices"]
 
     def filter_traces(self, traces: Dict[str, Any]) -> Dict[str, Any]:
         """Extract relevant traces for evaluation.
@@ -175,11 +175,11 @@ class MMLUEvaluator(Evaluator):
             "predicted": predicted,
             "gold": self.gold,
             "correct": correct,
-            "doc_id": self.task.metadata.get("doc_id"),
+            "doc_id": self.task.metadata["doc_id"],
         }
 
         # Extract logprobs from traces if available (for logprobs-based evaluation)
-        messages = traces.get("messages", [])
+        messages = traces["messages"]
         for msg in messages:
             if isinstance(msg, dict) and "logprobs" in msg:
                 result["logprobs"] = msg["logprobs"]
@@ -445,7 +445,7 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
         instance_map = {}  # (doc_id, choice_idx) -> position in results
 
         for task in tasks:
-            doc_id = task.metadata.get("doc_id")
+            doc_id = task.metadata["doc_id"]
             # Get prompt from task - use full_prompt from environment_data if available
             if self.use_full_prompt and "full_prompt" in task.environment_data:
                 prompt = task.environment_data["full_prompt"]
@@ -471,7 +471,7 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
         # Map results back to doc_ids
         doc_logprobs = {}
         for task in tasks:
-            doc_id = task.metadata.get("doc_id")
+            doc_id = task.metadata["doc_id"]
             logprobs = []
             for i in range(len(choices)):
                 pos = instance_map[(doc_id, i)]
@@ -498,20 +498,19 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
         which automatically picks single-token or multi-token scoring.
         """
         prompt = environment.get_prompt()
-        choices = environment.state.get("choices", DEFAULT_CHOICES)
-        doc_id = task.metadata.get("doc_id") if task else None
+        choices = environment.state["choices"]
+        doc_id = task.metadata["doc_id"]
 
-        if hasattr(self, "_precomputed_logprobs") and doc_id is not None:
-            logprobs = self._precomputed_logprobs.get(doc_id)
-            if logprobs is not None:
-                best_idx = logprobs.index(max(logprobs))
-                answer = choices[best_idx]
-                environment.state["logprobs"] = logprobs
-                environment.state["predicted_idx"] = best_idx
-                agent = agents[0]
-                agent._messages.append({"role": "user", "content": prompt})
-                agent._messages.append({"role": "assistant", "content": answer, "logprobs": logprobs})
-                return answer
+        if hasattr(self, "_precomputed_logprobs") and doc_id in self._precomputed_logprobs:
+            logprobs = self._precomputed_logprobs[doc_id]
+            best_idx = logprobs.index(max(logprobs))
+            answer = choices[best_idx]
+            environment.state["logprobs"] = logprobs
+            environment.state["predicted_idx"] = best_idx
+            agent = agents[0]
+            agent._messages.append({"role": "user", "content": prompt})
+            agent._messages.append({"role": "assistant", "content": answer, "logprobs": logprobs})
+            return answer
 
         logprobs = self._scorer.loglikelihood_choices(prompt, choices, delimiter=TARGET_DELIMITER)
 
@@ -677,14 +676,14 @@ def compute_benchmark_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     acc_norm_sum = 0.0
 
     for res in results:
-        if res.get("status") != STATUS_SUCCESS:
+        if res["status"] != STATUS_SUCCESS:
             continue
 
-        evals = res.get("eval") or []
+        evals = res["eval"] or []
         for entry in evals:
-            acc_sum += entry.get("acc", 0.0)
-            acc_norm_sum += entry.get("acc_norm", 0.0)
-            if entry.get("correct", False):
+            acc_sum += entry["acc"]
+            acc_norm_sum += entry["acc_norm"]
+            if entry["correct"]:
                 correct_count += 1
 
     return {

@@ -308,6 +308,44 @@ class TaskTimeoutError(MASEvalError):
 # =============================================================================
 
 
+def get_with_assert(container: Any, key: Any, error_msg: Optional[str] = None) -> Any:
+    """Get a value from a container, raising ``KeyError`` if not found.
+
+    Use instead of ``dict.get(key, default)`` when the key is **required**.
+    A missing key means a bug — not a case to paper over with a fallback.
+
+    Supports nested access via a list of keys::
+
+        get_with_assert(task, ["metadata", "doc_id"])
+        # equivalent to: task["metadata"]["doc_id"] but with a clear error
+
+    Args:
+        container: Dictionary or other container supporting ``in`` and ``[]``.
+        key: Key to look up. Pass a list for nested access.
+        error_msg: Custom error message. If ``None``, a descriptive default
+            is generated.
+
+    Returns:
+        The value at the given key.
+
+    Raises:
+        KeyError: If the key is not found in the container.
+    """
+    if isinstance(key, list):
+        assert len(key) > 0
+        value = get_with_assert(container, key[0], error_msg)
+        if len(key) == 1:
+            return value
+        return get_with_assert(value, key[1:], error_msg)
+
+    if key not in container:
+        if error_msg is None:
+            error_msg = f'Required key "{key}" not in container: {container}'
+        raise KeyError(error_msg)
+
+    return container[key]
+
+
 def validate_argument_type(
     value: Any,
     expected_type: str,

@@ -49,6 +49,7 @@ from .core.exceptions import (
     UserError,
     UserExhaustedError,
     TaskTimeoutError,
+    get_with_assert,
     validate_argument_type,
     validate_required_arguments,
     validate_no_extra_arguments,
@@ -106,6 +107,7 @@ __all__ = [
     "ChatResponse",
     "ModelScorer",
     # Exceptions and validation
+    "get_with_assert",
     "MASEvalError",
     "AgentError",
     "EnvironmentError",
