@@ -97,13 +97,28 @@ print(f"Evaluating {len(tasks)} anchor tasks")
 `MMLUBenchmark` is a framework-agnostic base class. To use a different model backend, subclass it and implement `setup_agents()` and `get_model_adapter()`:
 
 ```python
-from maseval import ModelAgentAdapter
+from maseval import AgentAdapter
+from maseval.core.history import MessageHistory
 from maseval.benchmark.mmlu import MMLUBenchmark
+
+class MyAgentAdapter(AgentAdapter):
+    def __init__(self, model, name):
+        super().__init__(model, name)
+        self._messages = []
+
+    def _run_agent(self, query):
+        self._messages.append({"role": "user", "content": query})
+        response = self.agent.generate(query)
+        self._messages.append({"role": "assistant", "content": response})
+        return response
+
+    def get_messages(self):
+        return MessageHistory(self._messages)
 
 class MyMMLUBenchmark(MMLUBenchmark):
     def setup_agents(self, agent_data, environment, task, user, seed_generator):
         model = self.get_model_adapter(agent_data["model_id"])
-        adapter = ModelAgentAdapter(model, name="mmlu_agent")
+        adapter = MyAgentAdapter(model, name="mmlu_agent")
         return [adapter], {"mmlu_agent": adapter}
 
     def get_model_adapter(self, model_id, **kwargs):

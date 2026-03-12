@@ -22,7 +22,7 @@ from .core.task import (
     AdaptiveTaskQueue,
 )
 from .core.environment import Environment
-from .core.agent import AgentAdapter, ModelAgentAdapter
+from .core.agent import AgentAdapter
 from .core.benchmark import Benchmark, TaskExecutionStatus
 from .core.callback_handler import CallbackHandler
 from .core.callback import BenchmarkCallback, EnvironmentCallback, AgentCallback
@@ -65,7 +65,6 @@ __all__ = [
     # Core abstractions
     "Environment",
     "AgentAdapter",
-    "ModelAgentAdapter",
     "Benchmark",
     "TaskExecutionStatus",
     # Callbacks

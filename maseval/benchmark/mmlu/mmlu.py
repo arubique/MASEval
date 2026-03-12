@@ -44,11 +44,11 @@ from maseval import (
     Environment,
     Evaluator,
     ModelAdapter,
-    ModelAgentAdapter,
     Task,
     User,
     SeedGenerator,
 )
+from maseval.core.history import MessageHistory
 from maseval.core.task import SequentialTaskQueue
 
 
@@ -65,6 +65,34 @@ TARGET_DELIMITER = " "  # lm-eval convention for MCQ
 MMLU_TASK_NAME = "mmlu_prompts"
 TASK_TYPE_MMLU = "mmlu"
 STATUS_SUCCESS = "success"
+
+
+# =============================================================================
+# Agent adapter for scorer-based evaluation
+# =============================================================================
+
+
+class _ScorerBackedAdapter(AgentAdapter):
+    """Agent adapter for benchmarks that use scorer-based evaluation.
+
+    This adapter is a message container for tracing — the benchmark's
+    ``run_agents()`` drives evaluation via a ``ModelScorer`` and records
+    results here.  Calling ``agent.run()`` directly is an error because
+    there is no generation model behind this adapter.
+    """
+
+    def __init__(self, scorer: Any, name: str) -> None:
+        super().__init__(agent_instance=scorer, name=name)
+        self._messages: List[Dict[str, Any]] = []
+
+    def _run_agent(self, query: str) -> Any:
+        raise NotImplementedError(
+            f"{type(self).__name__} is backed by a ModelScorer, not a generation model. "
+            "Use benchmark.run_agents() instead of calling agent.run() directly."
+        )
+
+    def get_messages(self) -> MessageHistory:
+        return MessageHistory(self._messages)
 
 
 # =============================================================================
@@ -280,16 +308,6 @@ class MMLUBenchmark(Benchmark):
         }
         return MMLUEnvironment(task_data)
 
-    def setup_user(
-        self,
-        agent_data: Dict[str, Any],
-        environment: Environment,
-        task: Task,
-        seed_generator: SeedGenerator,
-    ) -> Optional[User]:
-        """MMLU doesn't use a user simulator."""
-        return None
-
     def setup_evaluators(
         self,
         environment: Environment,
@@ -343,7 +361,7 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
     2. Efficient log-softmax computation
     3. Proper left-padding for batch processing
 
-    Agents are created using the generic ``ModelAgentAdapter``.
+    Agents are created using a scorer-backed adapter (see ``_ScorerBackedAdapter``).
     """
 
     def __init__(
@@ -387,10 +405,13 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
         user: Optional[User],
         seed_generator: SeedGenerator,
     ) -> Tuple[Sequence[AgentAdapter], Dict[str, AgentAdapter]]:
-        """Create model agent for MCQ evaluation.
+        """Create scorer-backed agent for MCQ evaluation.
+
+        The returned adapter is a tracing container — actual evaluation is
+        driven by ``self._scorer`` in ``run_agents()``.
 
         Args:
-            agent_data: Agent config. Must contain ``"model_id"`` (str).
+            agent_data: Agent config (unused; model is set at ``__init__``).
             environment: MMLU environment.
             task: Current task.
             user: Unused.
@@ -399,9 +420,7 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
         Returns:
             Tuple of (agents_to_run, agents_dict).
         """
-        model_id = agent_data["model_id"]
-        model = self.get_model_adapter(model_id, register_name=DEFAULT_MODEL_REGISTER_NAME)
-        adapter = ModelAgentAdapter(model, DEFAULT_AGENT_NAME)
+        adapter = _ScorerBackedAdapter(self._scorer, DEFAULT_AGENT_NAME)
         return [adapter], {DEFAULT_AGENT_NAME: adapter}
 
     def precompute_all_logprobs_lmeval(self, tasks: Sequence[Task]) -> Dict[Any, List[float]]:
@@ -525,35 +544,16 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
         return answer
 
     def get_model_adapter(self, model_id: str, **kwargs: Any) -> ModelAdapter:
-        """Provide a HuggingFace ``ModelAdapter``.
+        """Not used — ``DefaultMMLUBenchmark`` uses ``HuggingFaceModelScorer``.
 
-        The returned adapter is a placeholder — actual evaluation uses
-        ``HuggingFaceModelScorer`` for log-likelihood scoring. The adapter
-        is required by the ``Benchmark`` contract for ``setup_agents()``.
-
-        Args:
-            model_id: Model identifier (ignored, uses instance model_id).
-            **kwargs: Additional arguments (e.g., ``register_name``).
-
-        Returns:
-            ``HuggingFacePipelineModelAdapter`` instance.
+        Raises:
+            NotImplementedError: Always. Use ``HuggingFaceModelScorer`` via
+                ``self._scorer`` for log-likelihood evaluation.
         """
-        from maseval.interface.inference import HuggingFacePipelineModelAdapter
-
-        class _DummyCallable:
-            def __call__(self, prompt: str, **kw: Any) -> str:
-                return ""
-
-        adapter = HuggingFacePipelineModelAdapter(
-            model=_DummyCallable(),
-            model_id=self._model_id,
+        raise NotImplementedError(
+            "DefaultMMLUBenchmark uses HuggingFaceModelScorer for log-likelihood "
+            "evaluation, not a generation ModelAdapter. Access the scorer via self._scorer."
         )
-
-        register_name = kwargs.get("register_name")
-        if register_name:
-            self.register("models", register_name, adapter)
-
-        return adapter
 
 
 # =============================================================================
