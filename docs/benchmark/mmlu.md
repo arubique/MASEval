@@ -3,13 +3,13 @@
 !!! warning "Beta"
     This benchmark has been implemented carefully, but we have not yet validated the results against the original implementation. Use with caution when comparing with existing results or the original paper's numbers. Contributions and compute donations welcome!
 
-The **MMLU Benchmark** evaluates language models on multiple-choice questions spanning 57 academic subjects. The MASEval integration supports anchor-point-based evaluation for [DISCO](https://arxiv.org/abs/2407.12890) prediction, enabling efficient estimation of full benchmark performance from a subset of tasks.
+The **MMLU Benchmark** evaluates language models on multiple-choice questions spanning 57 academic subjects. The MASEval integration supports anchor-point-based evaluation for [DISCO](https://arxiv.org/abs/2510.07959) prediction, enabling efficient estimation of full benchmark performance from a subset of tasks.
 
 ## Overview
 
 [MMLU](https://arxiv.org/abs/2009.03300) (Hendrycks et al., 2021) is a widely used benchmark for measuring knowledge and reasoning across diverse domains. The MASEval implementation features:
 
-- **Log-likelihood MCQ evaluation** matching lm-evaluation-harness methodology
+- **Log-likelihood MCQ evaluation** matching [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) methodology
 - **Anchor-point task selection** via `DISCOQueue` for DISCO-style subset evaluation
 - **HuggingFace integration** with batched log-probability computation
 - **lm-eval compatibility** mode for exact numerical reproduction
