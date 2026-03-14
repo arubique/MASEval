@@ -516,17 +516,18 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
         otherwise delegates to ``HuggingFaceModelScorer.loglikelihood_choices()``
         which automatically picks single-token or multi-token scoring.
         """
-        prompt = environment.get_prompt()
-        choices = environment.state["choices"]
+        mmlu_env = cast(MMLUEnvironment, environment)
+        prompt = mmlu_env.get_prompt()
+        choices = mmlu_env.state["choices"]
         doc_id = task.metadata["doc_id"]
+        agent = cast(_ScorerBackedAdapter, agents[0])
 
         if hasattr(self, "_precomputed_logprobs") and doc_id in self._precomputed_logprobs:
             logprobs = self._precomputed_logprobs[doc_id]
             best_idx = logprobs.index(max(logprobs))
             answer = choices[best_idx]
-            environment.state["logprobs"] = logprobs
-            environment.state["predicted_idx"] = best_idx
-            agent = agents[0]
+            mmlu_env.state["logprobs"] = logprobs
+            mmlu_env.state["predicted_idx"] = best_idx
             agent._messages.append({"role": "user", "content": prompt})
             agent._messages.append({"role": "assistant", "content": answer, "logprobs": logprobs})
             return answer
@@ -535,10 +536,9 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
 
         best_idx = logprobs.index(max(logprobs))
         answer = choices[best_idx]
-        environment.state["logprobs"] = logprobs
-        environment.state["predicted_idx"] = best_idx
+        mmlu_env.state["logprobs"] = logprobs
+        mmlu_env.state["predicted_idx"] = best_idx
 
-        agent = agents[0]
         agent._messages.append({"role": "user", "content": prompt})
         agent._messages.append({"role": "assistant", "content": answer, "logprobs": logprobs})
         return answer
