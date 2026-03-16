@@ -327,15 +327,14 @@ class DISCOQueue(InformativeSubsetQueue):
 
     Selects a diverse subset of tasks (anchor points) for evaluation. Full
     benchmark performance is then predicted from results on this subset using
-    DISCO (DISCOvering key features for accurate prediction of LLM abilities
-    on benchmarks).
+    DISCO (Diversifying Sample Condensation for Efficient Model Evaluation).
 
     The informativeness criterion is **diversity**: anchor points are chosen
     to maximise disagreement across models, so that a small evaluation set
     captures the discriminative structure of the full benchmark.
 
-    Reference: `DISCO: DISCOvering key features for accurate prediction of
-    LLM abilities on benchmarks <https://arxiv.org/abs/2407.12890>`_
+    Reference: `DISCO: Diversifying Sample Condensation for Efficient Model
+    Evaluation <https://arxiv.org/abs/2510.07959>`_
 
     Example:
         ```python

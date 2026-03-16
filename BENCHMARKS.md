@@ -90,7 +90,7 @@ MMLU evaluates language models on multiple-choice questions spanning 57 academic
 ### Source and License
 
 - **Original Paper:** [Measuring Massive Multitask Language Understanding](https://arxiv.org/abs/2009.03300) (Hendrycks et al., 2021)
-- **DISCO Paper:** [DISCO: DISCOvering key features for accurate prediction of LLM abilities on benchmarks](https://arxiv.org/abs/2407.12890) (Rubinstein et al., 2025)
+- **DISCO Paper:** [DISCO: Diversifying Sample Condensation for Efficient Model Evaluation](https://arxiv.org/abs/2510.07959) (Rubinstein et al., ICLR 2026)
 - **Dataset:** [arubique/flattened-MMLU](https://huggingface.co/datasets/arubique/flattened-MMLU)
 
 ---
