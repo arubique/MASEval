@@ -88,7 +88,7 @@ tasks = load_tasks(
     anchor_points_path="/path/to/anchor_points.json",
 )
 
-# tasks is an DISCOQueue — only anchor tasks are evaluated
+# tasks is a DISCOQueue — only anchor tasks are evaluated
 print(f"Evaluating {len(tasks)} anchor tasks")
 ```
 

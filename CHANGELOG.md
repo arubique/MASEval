@@ -41,8 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Core**
 
-- Added `DISCOQueue` to `maseval.core.task` for subset-based evaluation (e.g., anchor-point selection for DISCO). Available via `from maseval import DISCOQueue`. (PR: #34)
-- Added `ModelScorer` abstract base class in `maseval.core.scorer` for log-likelihood scoring, with `loglikelihood()`, `loglikelihood_batch()`, and `loglikelihood_choices()` methods. (PR: #PR_NUMBER_PLACEHOLDER)
+- Added `InformativeSubsetQueue` and `DISCOQueue` to `maseval.core.task` for subset-based evaluation (e.g., anchor-point selection for DISCO). `DISCOQueue` accepts `anchor_points_path` to load indices from a `.json`/`.pkl` file via `DISCOQueue.load_anchor_points()`. Available via `from maseval import DISCOQueue, InformativeSubsetQueue`. (PR: #34)
+- Added `get_with_assert()` utility in `maseval.core.exceptions` for strict dictionary access that raises `KeyError` instead of silently returning a default. Supports nested key lookups. (PR: #34)
+- Added `ModelScorer` abstract base class in `maseval.core.scorer` for log-likelihood scoring, with `loglikelihood()`, `loglikelihood_batch()`, and `loglikelihood_choices()` methods. (PR: #34)
 - Added `SeedGenerator` abstract base class and `DefaultSeedGenerator` implementation for reproducible benchmark runs via SHA-256-based seed derivation (PR: #24)
 - Added `seed` and `seed_generator` parameters to `Benchmark.__init__` for enabling reproducibility (PR: #24)
 - Added `seed_generator` parameter to all benchmark setup methods (`setup_environment`, `setup_user`, `setup_agents`, `setup_evaluators`) (PR: #24)
@@ -53,8 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Interface**
 
-- Added `HuggingFaceModelScorer` in `maseval.interface.inference` — log-likelihood scorer backed by a HuggingFace `AutoModelForCausalLM`, with single-token optimisation for MCQ evaluation. Implements the `ModelScorer` interface. (PR: #PR_NUMBER_PLACEHOLDER)
-- Renamed `HuggingFaceModelAdapter` → `HuggingFacePipelineModelAdapter` to distinguish it from the new scorer. The old name remains as a backwards-compatible alias. (PR: #PR_NUMBER_PLACEHOLDER)
+- Added `HuggingFaceModelScorer` in `maseval.interface.inference` — log-likelihood scorer backed by a HuggingFace `AutoModelForCausalLM`, with single-token optimisation for MCQ evaluation. Implements the `ModelScorer` interface. (PR: #34)
+- Renamed `HuggingFaceModelAdapter` → `HuggingFacePipelineModelAdapter` to distinguish it from the new scorer. The old name remains as a backwards-compatible alias. (PR: #34)
 
 - CAMEL-AI integration: `CamelAgentAdapter` and `CamelLLMUser` for evaluating CAMEL-AI ChatAgent-based systems (PR: #22)
   - Added `CamelAgentUser` for using a CAMEL ChatAgent as the user in agent-to-agent evaluation (PR: #22)

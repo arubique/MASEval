@@ -110,6 +110,7 @@ nav:
           - Exceptions: reference/exceptions.md
           - History: reference/history.md
           - Model: reference/model.md
+          - Scorer: reference/scorer.md
           - Seeding: reference/seeding.md
           - Simulator: reference/simulator.md
           - Tasks: reference/task.md
