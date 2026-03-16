@@ -20,6 +20,16 @@ from maseval.core.task import (
 )
 
 
+class _FakeArray:
+    """Pickle-serializable array-like for testing .tolist() conversion."""
+
+    def tolist(self):
+        return [1, 2, 3]
+
+    def __iter__(self):
+        return iter([1, 2, 3])
+
+
 # ==================== Fixtures ====================
 
 
@@ -316,6 +326,86 @@ class TestDISCOQueue:
         queue = DISCOQueue(tasks, anchor_points=[1, 3, 7])
 
         assert len(queue) == 3
+
+
+@pytest.mark.core
+class TestDISCOQueueLoadAnchorPoints:
+    """Tests for DISCOQueue.load_anchor_points static method."""
+
+    def test_load_from_json(self, tmp_path):
+        """Should load anchor points from a JSON file."""
+        import json
+
+        path = tmp_path / "anchors.json"
+        path.write_text(json.dumps([0, 5, 12, 99]))
+
+        result = DISCOQueue.load_anchor_points(path)
+
+        assert result == [0, 5, 12, 99]
+
+    def test_load_from_pickle(self, tmp_path):
+        """Should load anchor points from a pickle file."""
+        import pickle
+
+        path = tmp_path / "anchors.pkl"
+        with open(path, "wb") as f:
+            pickle.dump([2, 7, 15], f)
+
+        result = DISCOQueue.load_anchor_points(path)
+
+        assert result == [2, 7, 15]
+
+    def test_load_converts_tolist(self, tmp_path):
+        """Should call .tolist() on array-like objects (e.g. numpy arrays)."""
+        import pickle
+
+        path = tmp_path / "anchors.pkl"
+        with open(path, "wb") as f:
+            pickle.dump(_FakeArray(), f)
+
+        result = DISCOQueue.load_anchor_points(path)
+
+        assert result == [1, 2, 3]
+
+    def test_file_not_found(self, tmp_path):
+        """Should raise FileNotFoundError for missing files."""
+        with pytest.raises(FileNotFoundError, match="not found"):
+            DISCOQueue.load_anchor_points(tmp_path / "nonexistent.json")
+
+    def test_accepts_string_path(self, tmp_path):
+        """Should accept a string path, not just Path objects."""
+        import json
+
+        path = tmp_path / "anchors.json"
+        path.write_text(json.dumps([10, 20]))
+
+        result = DISCOQueue.load_anchor_points(str(path))
+
+        assert result == [10, 20]
+
+    def test_init_with_anchor_points_path(self, tmp_path):
+        """DISCOQueue should load anchor points from file when anchor_points_path is given."""
+        import json
+
+        tasks = [Task(query=f"Q{i}") for i in range(10)]
+        path = tmp_path / "anchors.json"
+        path.write_text(json.dumps([2, 5, 8]))
+
+        queue = DISCOQueue(tasks, anchor_points_path=path)
+
+        assert len(queue) == 3
+        assert queue._anchor_points == [2, 5, 8]
+
+    def test_init_rejects_both_anchor_args(self, tmp_path):
+        """DISCOQueue should raise ValueError when both anchor_points and anchor_points_path are given."""
+        import json
+
+        tasks = [Task(query=f"Q{i}") for i in range(5)]
+        path = tmp_path / "anchors.json"
+        path.write_text(json.dumps([0, 1]))
+
+        with pytest.raises(ValueError, match="not both"):
+            DISCOQueue(tasks, anchor_points=[0, 1], anchor_points_path=path)
 
 
 # ==================== PriorityTaskQueue Tests ====================

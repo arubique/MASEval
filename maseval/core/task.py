@@ -5,6 +5,7 @@ from uuid import uuid4
 from collections.abc import Sequence
 from typing import Iterable, List, Union, Iterator, Optional
 import json
+import pickle
 from pathlib import Path
 from enum import Enum
 
@@ -339,24 +340,74 @@ class DISCOQueue(InformativeSubsetQueue):
     Example:
         ```python
         queue = DISCOQueue(tasks, anchor_points=[0, 5, 12])
+        # or load from file:
+        queue = DISCOQueue(tasks, anchor_points_path="anchor_points.pkl")
 
         for task in queue:
-            result = execute(task)  # Only 3 tasks
+            result = execute(task)  # Only anchor-point tasks
         ```
     """
 
-    def __init__(self, tasks: Iterable[Task], anchor_points: Optional[List[int]] = None) -> None:
+    def __init__(
+        self,
+        tasks: Iterable[Task],
+        anchor_points: Optional[List[int]] = None,
+        anchor_points_path: Optional[Union[str, Path]] = None,
+    ) -> None:
         """Initialize DISCO task queue.
+
+        Anchor points can be supplied directly via ``anchor_points`` or loaded
+        from a file via ``anchor_points_path``.  Providing both is an error.
 
         Args:
             tasks: Full list of tasks (ordered by index).
             anchor_points: Diversity-selected indices into ``tasks``.
-                Typically loaded from a DISCO anchor-points file or
-                downloaded from a HuggingFace DISCO model repo.
-                If ``None``, evaluates all tasks in order.
+                Typically downloaded from a HuggingFace DISCO model repo.
+                If ``None`` and ``anchor_points_path`` is also ``None``,
+                evaluates all tasks in order.
+            anchor_points_path: Path to a ``.json`` or ``.pkl`` file
+                containing anchor-point indices.  Mutually exclusive with
+                ``anchor_points``.
         """
+        if anchor_points is not None and anchor_points_path is not None:
+            raise ValueError("Provide either anchor_points or anchor_points_path, not both.")
+
+        if anchor_points_path is not None:
+            anchor_points = self.load_anchor_points(anchor_points_path)
+
         self._anchor_points: Optional[List[int]] = anchor_points
         super().__init__(tasks, indices=anchor_points)
+
+    @staticmethod
+    def load_anchor_points(path: Union[str, Path]) -> List[int]:
+        """Load anchor points from a ``.json`` or ``.pkl`` file.
+
+        Args:
+            path: Path to anchor points file. JSON files should contain a
+                list of integer indices. Pickle files may contain a list or
+                a numpy array.
+
+        Returns:
+            List of integer anchor-point indices.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+        """
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Anchor points file not found: {path}")
+
+        if path.suffix.lower() == ".json":
+            with open(path) as f:
+                anchor_points = json.load(f)
+        else:
+            with open(path, "rb") as f:
+                anchor_points = pickle.load(f)
+
+        if hasattr(anchor_points, "tolist"):
+            anchor_points = anchor_points.tolist()
+
+        return list(anchor_points)
 
 
 class PriorityTaskQueue(BaseTaskQueue):

@@ -24,18 +24,8 @@ Usage:
 """
 
 import json
-import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
-
-# numpy is optional - only needed for anchor points processing
-try:
-    import numpy as np
-
-    HAS_NUMPY = True
-except ImportError:
-    np = None  # type: ignore[assignment]
-    HAS_NUMPY = False
 
 from maseval import (
     AgentAdapter,
@@ -561,29 +551,6 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
 # =============================================================================
 
 
-def load_pickle(path: Union[str, Path]) -> Any:
-    """Load a pickle file."""
-    with open(path, "rb") as f:
-        return pickle.load(f)
-
-
-def load_anchor_points(path: Union[str, Path]) -> List[int]:
-    """Load anchor points from a .json or .pkl file. Returns a list of doc_ids."""
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Anchor points file not found: {path}")
-    if path.suffix.lower() == ".json":
-        with open(path) as f:
-            anchor_points = json.load(f)
-    else:
-        anchor_points = load_pickle(path)
-    if HAS_NUMPY and isinstance(anchor_points, np.ndarray):
-        anchor_points = anchor_points.tolist()
-    elif not HAS_NUMPY and hasattr(anchor_points, "tolist"):
-        anchor_points = anchor_points.tolist()
-    return list(anchor_points)
-
-
 def load_tasks(
     data_path: Union[str, Path],
     anchor_points_path: Optional[Union[str, Path]] = None,
@@ -601,8 +568,6 @@ def load_tasks(
     Returns:
         TaskQueue containing MMLU tasks.
 
-    Raises:
-        ImportError: If anchor_points_path is provided but numpy is not installed.
     """
     data_path = Path(data_path)
 
@@ -642,14 +607,8 @@ def load_tasks(
         )
         tasks.append(task)
 
-    # Load anchor points if provided
-    anchor_points = None
     if anchor_points_path is not None:
-        anchor_points = load_anchor_points(anchor_points_path)
-
-    # Create appropriate queue
-    if anchor_points is not None:
-        return DISCOQueue(tasks, anchor_points)
+        return DISCOQueue(tasks, anchor_points_path=anchor_points_path)
     else:
         return SequentialTaskQueue(tasks)
 
