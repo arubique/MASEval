@@ -55,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Interface**
 
 - Added `HuggingFaceModelScorer` in `maseval.interface.inference` — log-likelihood scorer backed by a HuggingFace `AutoModelForCausalLM`, with single-token optimisation for MCQ evaluation. Implements the `ModelScorer` interface. (PR: #34)
-- Renamed `HuggingFaceModelAdapter` → `HuggingFacePipelineModelAdapter` to distinguish it from the new scorer. The old name remains as a backwards-compatible alias. (PR: #34)
+- Renamed `HuggingFaceModelAdapter` → `HuggingFacePipelineModelAdapter` to distinguish it from the new scorer. (PR: #34)
 
 - CAMEL-AI integration: `CamelAgentAdapter` and `CamelLLMUser` for evaluating CAMEL-AI ChatAgent-based systems (PR: #22)
   - Added `CamelAgentUser` for using a CAMEL ChatAgent as the user in agent-to-agent evaluation (PR: #22)
@@ -93,7 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Benchmarks**
 
-- `MMLUBenchmark` no longer implements `setup_agents()` — consistent with other benchmarks, agent creation is left to concrete subclasses (e.g., `DefaultMMLUBenchmark`). Removed silent `.get()` fallbacks for required fields (`gold`, `query`, `model_id`) so missing data surfaces errors immediately instead of failing silently. `DISCOQueue` moved from `maseval.benchmark.mmlu` to `maseval.core.task` and now extends `SequentialTaskQueue` instead of `AdaptiveTaskQueue`. Added `mmlu` optional extra (`pip install maseval[mmlu]`). `DefaultMMLUBenchmark` now delegates log-likelihood computation to `HuggingFaceModelScorer` and uses a scorer-backed adapter instead of the MMLU-specific `MMLUModelAgent`/`MMLUAgentAdapter` (removed). (PR: #34)
+- `MMLUBenchmark` is now a framework-agnostic base class — `setup_agents()` and `get_model_adapter()` must be implemented by subclasses. Use `DefaultMMLUBenchmark` for HuggingFace models. Missing required fields now raise immediately instead of falling back to silent defaults. Install with `pip install maseval[mmlu]`. (PR: #34)
+- `DISCOQueue` moved from `maseval.benchmark.mmlu` to `maseval.core.task` and now extends `SequentialTaskQueue`. Removed `MMLUModelAgent`, `MMLUAgentAdapter`, and `AnchorPointsTaskQueue`. (PR: #34)
 - `MACSBenchmark` and `Tau2Benchmark` benchmarks now actively use the seeding system by deriving seeds for model adapters. Seeds are passed to agents, user simulators, tool simulators, and LLM-based evaluators for reproducible runs. (PR: #26)
   - `Gaia2Benchmark`: Seeds `agents/gaia2_agent`, `evaluators/judge`
   - `MACSBenchmark`: Seeds `environment/tools/tool_{name}`, `simulators/user`, `evaluators/user_gsr`, `evaluators/system_gsr`

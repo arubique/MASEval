@@ -57,12 +57,10 @@ except ImportError:
 try:
     from .huggingface import (  # noqa: F401
         HuggingFacePipelineModelAdapter,
-        HuggingFaceModelAdapter,
         ToolCallingNotSupportedError,
     )
 
     __all__.append("HuggingFacePipelineModelAdapter")
-    __all__.append("HuggingFaceModelAdapter")
     __all__.append("ToolCallingNotSupportedError")
 except ImportError:
     pass

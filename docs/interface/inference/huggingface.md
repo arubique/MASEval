@@ -8,9 +8,6 @@ This page documents the HuggingFace model adapters for MASEval.
 
 ::: maseval.interface.inference.huggingface.HuggingFacePipelineModelAdapter
 
-!!! note
-    `HuggingFaceModelAdapter` is a backwards-compatible alias for `HuggingFacePipelineModelAdapter`.
-
 ## Model Scorer (Log-Likelihood)
 
 [:material-github: View source](https://github.com/parameterlab/maseval/blob/main/maseval/interface/inference/huggingface_scorer.py){ .md-source-file }

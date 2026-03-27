@@ -85,7 +85,7 @@ MMLU evaluates language models on multiple-choice questions spanning 57 academic
 
 > **Beta:** This benchmark has been implemented carefully, but we have not yet validated the results against the original implementation. Use with caution when comparing with existing results or the original paper's numbers. Contributions and compute donations welcome!
 
-> **Implemented:** A ready-to-use implementation is available via `DefaultMMLUBenchmark` with HuggingFace model support. Install with `pip install maseval[mmlu]`. See the [MMLU documentation](docs/benchmark/mmlu.md) for usage details.
+> **Implemented:** A ready-to-use implementation is available via `DefaultMMLUBenchmark` with HuggingFace model support. Install with `pip install maseval[mmlu]`. See the [MMLU documentation](https://maseval.readthedocs.io/en/stable/benchmark/mmlu/) for usage details.
 
 ### Source and License
 

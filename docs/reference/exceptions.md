@@ -38,10 +38,6 @@ SimulatorError (base for simulators)
 
 ::: maseval.core.simulator.UserSimulatorError
 
-## Data Access Helpers
-
-::: maseval.core.exceptions.get_with_assert
-
 ## Validation Helpers
 
 These functions simplify input validation and raise `AgentError` with helpful suggestions:

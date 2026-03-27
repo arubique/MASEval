@@ -387,7 +387,3 @@ class HuggingFacePipelineModelAdapter(ModelAdapter):
             base_config["pipeline_config"] = pipeline_config
 
         return base_config
-
-
-# Backwards compatibility alias
-HuggingFaceModelAdapter = HuggingFacePipelineModelAdapter

@@ -10,7 +10,7 @@ Usage:
     from maseval.benchmark.mmlu import (
         DefaultMMLUBenchmark, load_tasks,
     )
-    from maseval import DISCOQueue
+    from maseval.core.task import DISCOQueue
 
     # Load tasks (optionally filtered to anchor points)
     tasks = load_tasks(
@@ -27,19 +27,15 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
 
-from maseval import (
-    AgentAdapter,
-    DISCOQueue,
-    Benchmark,
-    Environment,
-    Evaluator,
-    ModelAdapter,
-    Task,
-    User,
-    SeedGenerator,
-)
+from maseval.core.agent import AgentAdapter
+from maseval.core.benchmark import Benchmark
+from maseval.core.environment import Environment
+from maseval.core.evaluator import Evaluator
 from maseval.core.history import MessageHistory
-from maseval.core.task import SequentialTaskQueue
+from maseval.core.model import ModelAdapter
+from maseval.core.seeding import SeedGenerator
+from maseval.core.task import DISCOQueue, SequentialTaskQueue, Task
+from maseval.core.user import User
 
 
 # =============================================================================
@@ -74,6 +70,10 @@ class _ScorerBackedAdapter(AgentAdapter):
     def __init__(self, scorer: Any, name: str) -> None:
         super().__init__(agent_instance=scorer, name=name)
         self._messages: List[Dict[str, Any]] = []
+
+    def record_message(self, message: Dict[str, Any]) -> None:
+        """Record a message for tracing purposes."""
+        self._messages.append(message)
 
     def _run_agent(self, query: str) -> Any:
         raise NotImplementedError(
@@ -378,6 +378,7 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
         self._device = device
         self._trust_remote_code = trust_remote_code
         self._batch_size = batch_size
+        self._precomputed_logprobs: Optional[Dict[Any, List[float]]] = None
 
         from maseval.interface.inference.huggingface_scorer import HuggingFaceModelScorer
 
@@ -512,25 +513,18 @@ class DefaultMMLUBenchmark(MMLUBenchmark):
         doc_id = task.metadata["doc_id"]
         agent = cast(_ScorerBackedAdapter, agents[0])
 
-        if hasattr(self, "_precomputed_logprobs") and doc_id in self._precomputed_logprobs:
+        if self._precomputed_logprobs is not None and doc_id in self._precomputed_logprobs:
             logprobs = self._precomputed_logprobs[doc_id]
-            best_idx = logprobs.index(max(logprobs))
-            answer = choices[best_idx]
-            mmlu_env.state["logprobs"] = logprobs
-            mmlu_env.state["predicted_idx"] = best_idx
-            agent._messages.append({"role": "user", "content": prompt})
-            agent._messages.append({"role": "assistant", "content": answer, "logprobs": logprobs})
-            return answer
-
-        logprobs = self._scorer.loglikelihood_choices(prompt, choices, delimiter=TARGET_DELIMITER)
+        else:
+            logprobs = self._scorer.loglikelihood_choices(prompt, choices, delimiter=TARGET_DELIMITER)
 
         best_idx = logprobs.index(max(logprobs))
         answer = choices[best_idx]
         mmlu_env.state["logprobs"] = logprobs
         mmlu_env.state["predicted_idx"] = best_idx
 
-        agent._messages.append({"role": "user", "content": prompt})
-        agent._messages.append({"role": "assistant", "content": answer, "logprobs": logprobs})
+        agent.record_message({"role": "user", "content": prompt})
+        agent.record_message({"role": "assistant", "content": answer, "logprobs": logprobs})
         return answer
 
     def get_model_adapter(self, model_id: str, **kwargs: Any) -> ModelAdapter:
@@ -589,11 +583,14 @@ def load_tasks(
         if "gold" not in item:
             raise ValueError(f"MMLU task at index {i} missing required 'gold' field (correct answer index)")
 
+        if "choices" not in item:
+            raise ValueError(f"MMLU task at index {i} missing required 'choices' field")
+
         task = Task(
             query=query,
             id=f"mmlu_{i}",
             environment_data={
-                "choices": item.get("choices", DEFAULT_CHOICES),
+                "choices": item["choices"],
                 "full_prompt": item.get("full_prompt", ""),
                 "example": item.get("example", ""),
             },
@@ -638,7 +635,7 @@ def compute_benchmark_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
         if res["status"] != STATUS_SUCCESS:
             continue
 
-        evals = res["eval"] or []
+        evals = res["eval"] if res["eval"] is not None else []
         for entry in evals:
             acc_sum += entry["acc"]
             acc_norm_sum += entry["acc_norm"]

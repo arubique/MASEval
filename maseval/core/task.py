@@ -315,8 +315,14 @@ class InformativeSubsetQueue(SequentialTaskQueue):
         self._indices: Optional[List[int]] = indices
 
         if indices is not None:
-            task_by_index: Dict[int, Task] = {i: task for i, task in enumerate(all_tasks)}
-            filtered = [task_by_index[idx] for idx in indices if idx in task_by_index]
+            n_tasks = len(all_tasks)
+            out_of_range = [idx for idx in indices if idx < 0 or idx >= n_tasks]
+            if out_of_range:
+                raise IndexError(
+                    f"Indices {out_of_range} are out of range for task list of length {n_tasks}. "
+                    "This likely means a mismatch between the task data and the index file."
+                )
+            filtered = [all_tasks[idx] for idx in indices]
             super().__init__(filtered)
         else:
             super().__init__(all_tasks)

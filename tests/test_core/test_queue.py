@@ -263,14 +263,12 @@ class TestInformativeSubsetQueue:
         assert len(queue._all_tasks) == 3
         assert len(queue) == 1
 
-    def test_out_of_range_indices_skipped(self):
-        """Indices not present in the task list should be silently skipped."""
+    def test_out_of_range_indices_raises(self):
+        """Out-of-range indices should raise IndexError."""
         tasks = [Task(query="Q0"), Task(query="Q1")]
-        queue = InformativeSubsetQueue(tasks, indices=[0, 5, 99])
 
-        queries = [task.query for task in queue]
-
-        assert queries == ["Q0"]
+        with pytest.raises(IndexError, match="out of range"):
+            InformativeSubsetQueue(tasks, indices=[0, 5, 99])
 
     def test_empty_indices(self, simple_tasks):
         """Empty indices list should yield no tasks."""

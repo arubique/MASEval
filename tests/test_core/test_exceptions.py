@@ -14,7 +14,6 @@ from maseval import (
     AgentError,
     EnvironmentError,
     UserError,
-    get_with_assert,
     validate_argument_type,
     validate_required_arguments,
     validate_no_extra_arguments,
@@ -369,52 +368,6 @@ class TestValidationHelpers:
         # Strict mode rejects extra args
         with pytest.raises(AgentError, match="Unexpected argument"):
             validate_arguments_from_schema({"name": "test", "extra": 1}, schema, strict=True)
-
-
-@pytest.mark.core
-class TestGetWithAssert:
-    """Tests for get_with_assert required-key lookup."""
-
-    def test_single_key_present(self):
-        """Returns value when key exists."""
-        assert get_with_assert({"a": 1}, "a") == 1
-
-    def test_single_key_missing_raises_key_error(self):
-        """Raises KeyError with descriptive message when key is missing."""
-        with pytest.raises(KeyError, match='Required key "x"'):
-            get_with_assert({"a": 1}, "x")
-
-    def test_nested_key_access(self):
-        """Supports nested access via a list of keys."""
-        data = {"level1": {"level2": {"level3": "value"}}}
-        assert get_with_assert(data, ["level1", "level2", "level3"]) == "value"
-
-    def test_nested_key_missing_raises_key_error(self):
-        """Raises KeyError when a nested key is missing."""
-        data = {"level1": {"level2": {}}}
-        with pytest.raises(KeyError):
-            get_with_assert(data, ["level1", "level2", "level3"])
-
-    def test_custom_error_message(self):
-        """Uses custom error message when provided."""
-        with pytest.raises(KeyError, match="MMLU task missing query"):
-            get_with_assert({}, "query", error_msg="MMLU task missing query")
-
-    def test_single_element_list_key(self):
-        """List with one key behaves like a single key."""
-        assert get_with_assert({"a": 42}, ["a"]) == 42
-
-    def test_falsy_values_returned(self):
-        """Falsy values (0, empty string, False, None) are returned, not treated as missing."""
-        assert get_with_assert({"k": 0}, "k") == 0
-        assert get_with_assert({"k": ""}, "k") == ""
-        assert get_with_assert({"k": False}, "k") is False
-        assert get_with_assert({"k": None}, "k") is None
-
-    def test_empty_key_list_raises(self):
-        """Empty key list triggers assertion error."""
-        with pytest.raises(AssertionError):
-            get_with_assert({"a": 1}, [])
 
 
 class TestFilteringByErrorType:
