@@ -271,7 +271,9 @@ class TestMessageHistory:
         assert history.get_last_message() is None
         history.add_message("user", "First")
         history.add_message("assistant", "Second")
-        assert history.get_last_message()["content"] == "Second"
+        last = history.get_last_message()
+        assert last is not None
+        assert last["content"] == "Second"
 
     def test_to_openai_format_strips_metadata_and_timestamps(self):
         """Test to_openai_format strips metadata and timestamps."""

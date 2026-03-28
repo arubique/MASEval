@@ -215,6 +215,7 @@ def test_file_result_logger_validate_detects_duplicates(tmp_path):
     logger.on_task_repeat_end(benchmark, report)  # type: ignore[arg-type]
 
     # Manually write a duplicate line to the file
+    assert logger._file_handle is not None
     logger._file_handle.write(json.dumps(report) + "\n")
     logger._file_handle.flush()
     logger._lines_written += 1

@@ -421,7 +421,7 @@ class TestDefaultMMLUBenchmark:
                 for k, v in kwargs.items():
                     setattr(self, k, v)
 
-        mock_instance_mod.Instance = FakeInstance
+        setattr(mock_instance_mod, "Instance", FakeInstance)
 
         # FakeHFLM returns (logprob, is_greedy) tuples
         class FakeHFLM:
@@ -431,7 +431,7 @@ class TestDefaultMMLUBenchmark:
             def loglikelihood(self, instances):
                 return [(-float(i), True) for i in range(len(instances))]
 
-        mock_hflm_mod.HFLM = FakeHFLM
+        setattr(mock_hflm_mod, "HFLM", FakeHFLM)
 
         tasks = sample_mmlu_tasks
         with patch.dict(
