@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Core**
 
-- Fixed `MessageHistory.to_list()` returning a reference to the internal list instead of a copy, causing simulator logs to contain future conversation messages that hadn't occurred at the time of logging. (PR: #PR_NUMBER_PLACEHOLDER)
+- Fixed `MessageHistory.to_list()` returning a reference to the internal list instead of a copy, causing simulator logs to contain future conversation messages that hadn't occurred at the time of logging. (PR: #48)
+- Fixed `get_git_info()` crashing on detached HEAD (e.g. in CI checkout), now returns `detached@<short-hash>` as the branch name. (PR: #41)
 
 **Interface**
 
