@@ -42,7 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Core**
 
 - Added `InformativeSubsetQueue` and `DISCOQueue` to `maseval.core.task` for subset-based evaluation (e.g., anchor-point selection for DISCO). `DISCOQueue` accepts `anchor_points_path` to load indices from a `.json`/`.pkl` file via `DISCOQueue.load_anchor_points()`. Available via `from maseval import DISCOQueue, InformativeSubsetQueue`. (PR: #34)
-- Added `get_with_assert()` utility in `maseval.core.exceptions` for strict dictionary access that raises `KeyError` instead of silently returning a default. Supports nested key lookups. (PR: #34)
 - Added `ModelScorer` abstract base class in `maseval.core.scorer` for log-likelihood scoring, with `loglikelihood()`, `loglikelihood_batch()`, and `loglikelihood_choices()` methods. (PR: #34)
 - Added `SeedGenerator` abstract base class and `DefaultSeedGenerator` implementation for reproducible benchmark runs via SHA-256-based seed derivation (PR: #24)
 - Added `seed` and `seed_generator` parameters to `Benchmark.__init__` for enabling reproducibility (PR: #24)
