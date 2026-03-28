@@ -105,12 +105,20 @@ class MMLUEnvironment(Environment):
                 (dict with ``"choices"``, ``"full_prompt"``, ``"use_full_prompt"``).
         """
         env_data = task_data["environment_data"]
-        return {
+        use_full_prompt = env_data["use_full_prompt"]
+        if use_full_prompt and "full_prompt" not in env_data:
+            raise ValueError(
+                "use_full_prompt=True but 'full_prompt' is missing from environment_data. "
+                "Ensure the dataset includes few-shot prompts or set use_full_prompt=False."
+            )
+        state: Dict[str, Any] = {
             "query": task_data["query"],
             "choices": env_data["choices"],
-            "full_prompt": env_data["full_prompt"],
-            "use_full_prompt": env_data["use_full_prompt"],
+            "use_full_prompt": use_full_prompt,
         }
+        if "full_prompt" in env_data:
+            state["full_prompt"] = env_data["full_prompt"]
+        return state
 
     def create_tools(self) -> Dict[str, Any]:
         """MMLU doesn't use tools."""
@@ -179,13 +187,14 @@ class MMLUEvaluator(Evaluator):
             final_answer: The model's final answer.
 
         Returns:
-            Dict with acc, acc_norm, predicted, gold, correct, and optionally logprobs fields.
+            Dict with acc, acc_norm, predicted, gold, correct, parse_failed, and optionally logprobs fields.
         """
         # Parse the model's answer
         predicted = self._parse_answer(final_answer or "")
+        parse_failed = predicted is None
 
-        # Check if correct
-        correct = predicted == self.gold
+        # Check if correct — unparseable responses are never correct
+        correct = (not parse_failed) and predicted == self.gold
 
         result = {
             "acc": 1.0 if correct else 0.0,
@@ -193,6 +202,7 @@ class MMLUEvaluator(Evaluator):
             "predicted": predicted,
             "gold": self.gold,
             "correct": correct,
+            "parse_failed": parse_failed,
             "doc_id": self.task.metadata["doc_id"],
         }
 
@@ -205,7 +215,7 @@ class MMLUEvaluator(Evaluator):
 
         return result
 
-    def _parse_answer(self, response: str) -> int:
+    def _parse_answer(self, response: str) -> Optional[int]:
         """Parse model response to extract answer choice.
 
         Handles various formats:
@@ -217,10 +227,10 @@ class MMLUEvaluator(Evaluator):
             response: Model's response string.
 
         Returns:
-            Index of the predicted choice (0-3), or -1 if unparseable.
+            Index of the predicted choice (0-3), or None if unparseable.
         """
         if not response:
-            return -1
+            return None
 
         response = response.strip().upper()
 
@@ -242,7 +252,7 @@ class MMLUEvaluator(Evaluator):
             if last_char == choice:
                 return i
 
-        return -1
+        return None
 
 
 # =============================================================================
@@ -591,8 +601,8 @@ def load_tasks(
             id=f"mmlu_{i}",
             environment_data={
                 "choices": item["choices"],
-                "full_prompt": item.get("full_prompt", ""),
-                "example": item.get("example", ""),
+                **({"full_prompt": item["full_prompt"]} if "full_prompt" in item else {}),
+                **({"example": item["example"]} if "example" in item else {}),
             },
             evaluation_data={
                 "gold": item["gold"],
@@ -628,6 +638,7 @@ def compute_benchmark_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     total_tasks = len(results)
     correct_count = 0
+    parse_failed_count = 0
     acc_sum = 0.0
     acc_norm_sum = 0.0
 
@@ -641,10 +652,13 @@ def compute_benchmark_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
             acc_norm_sum += entry["acc_norm"]
             if entry["correct"]:
                 correct_count += 1
+            if entry.get("parse_failed", False):
+                parse_failed_count += 1
 
     return {
         "total_tasks": total_tasks,
         "correct_count": correct_count,
+        "parse_failed_count": parse_failed_count,
         "acc": acc_sum / total_tasks if total_tasks > 0 else 0.0,
         "acc_norm": acc_norm_sum / total_tasks if total_tasks > 0 else 0.0,
     }

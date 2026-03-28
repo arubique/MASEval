@@ -168,6 +168,10 @@ class HuggingFaceModelScorer(ModelScorer):
             logits = model(input_ids).logits[0]
             inplen = len(input_tokens)
             contlen = len(continuation_enc)
+            assert inplen >= contlen, (
+                f"Context tokens ({inplen}) fewer than continuation tokens ({contlen}). "
+                f"Tokenisation produced an unexpected result for context={context!r}, continuation={continuation!r}"
+            )
             selected = logits[inplen - contlen : inplen]
             log_probs = torch.nn.functional.log_softmax(selected, dim=-1)
 
@@ -235,6 +239,10 @@ class HuggingFaceModelScorer(ModelScorer):
             logits = model(input_ids).logits[0]
             inplen = len(input_tokens)
             contlen = len(first_cont_enc)
+            assert inplen >= contlen, (
+                f"Context tokens ({inplen}) fewer than continuation tokens ({contlen}). "
+                "Tokenisation produced an unexpected result."
+            )
             selected_logits = logits[inplen - contlen : inplen]
             log_probs = torch.nn.functional.log_softmax(selected_logits, dim=-1)
 

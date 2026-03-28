@@ -87,8 +87,8 @@ class TestMMLUEvaluatorParseAnswer:
             # Last character
             ("I think it's B", 1),
             # Empty / unparseable
-            ("", -1),
-            ("random text", -1),
+            ("", None),
+            ("random text", None),
         ],
     )
     def test_parse_answer(self, evaluator, response, expected):
