@@ -26,7 +26,7 @@ from pathlib import Path
 
 from utils import sanitize_name  # type: ignore[unresolved-import]
 
-from maseval import Benchmark, Environment, Evaluator, Task, TaskQueue, AgentAdapter, ModelAdapter, SeedGenerator
+from maseval import Benchmark, Environment, Evaluator, Task, TaskQueue, AgentAdapter, ModelAdapter, SeedGenerator, UsageReporter
 from maseval.core.callbacks.result_logger import FileResultLogger
 
 # Import tool implementations
@@ -954,11 +954,39 @@ if __name__ == "__main__":
     benchmark = FiveADayBenchmark(
         callbacks=[logger],
         seed=args.seed,  # Use benchmark's seeding system
-        fail_on_setup_error=True,
-        fail_on_task_error=True,
-        fail_on_evaluation_error=True,
+        fail_on_setup_error=False,
+        fail_on_task_error=False,
+        fail_on_evaluation_error=False,
     )
     results = benchmark.run(tasks=tasks, agent_data=agent_configs)
+
+    # --- Usage summary ---
+    from maseval import TokenUsage
+
+    def _fmt_usage(usage):
+        parts = [f"cost=${usage.cost:.6f}"]
+        if isinstance(usage, TokenUsage):
+            parts.append(f"in={usage.input_tokens:>10,}  out={usage.output_tokens:>10,}")
+        if usage.units:
+            parts.append(f"units={dict(usage.units)}")
+        return "  ".join(parts)
+
+    reporter = UsageReporter.from_reports(results)
+
+    print("\n--- Usage Summary ---")
+    print(f"Total: {_fmt_usage(reporter.total())}")
+
+    by_component = reporter.by_component()
+    if by_component:
+        print("\nBy component:")
+        for key, usage in by_component.items():
+            print(f"  {key:<35} {_fmt_usage(usage)}")
+
+    by_task = reporter.by_task()
+    if by_task:
+        print("\nPer-task:")
+        for task_id, usage in by_task.items():
+            print(f"  {task_id:<35} {_fmt_usage(usage)}")
 
     print("\n--- Benchmark Complete ---")
     print(f"Total tasks: {len(tasks)}")

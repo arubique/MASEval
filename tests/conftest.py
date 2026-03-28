@@ -48,7 +48,7 @@ class DummyModelAdapter(ModelAdapter):
         model_id: str = "test-model",
         responses: Optional[List[Optional[str]]] = None,
         tool_calls: Optional[List[Optional[List[Dict[str, Any]]]]] = None,
-        usage: Optional[Dict[str, int]] = None,
+        usage: Optional[Dict[str, Any]] = None,
         stop_reason: Optional[str] = None,
         seed: Optional[int] = None,
     ):
@@ -216,6 +216,9 @@ class FakeSmolagentsModel:
         self.model_id = "mock-model"
         self._responses = responses or ["mock response"]
         self._call_index = 0
+
+    def to_dict(self) -> dict:
+        return {"class": self.__class__.__name__, "model_id": self.model_id}
 
     def __call__(self, *args, **kwargs):
         return self.generate(*args, **kwargs)

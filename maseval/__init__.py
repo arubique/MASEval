@@ -40,6 +40,8 @@ from .core.user import User, LLMUser, AgenticLLMUser, TerminationReason
 from .core.evaluator import Evaluator
 from .core.history import MessageHistory, ToolInvocationHistory
 from .core.tracing import TraceableMixin
+from .core.usage import Usage, TokenUsage, UsageTrackableMixin
+from .core.usage import CostCalculator, StaticPricingCalculator, UsageReporter
 from .core.registry import ComponentRegistry
 from .core.context import TaskContext
 from .core.exceptions import (
@@ -48,6 +50,7 @@ from .core.exceptions import (
     EnvironmentError,
     UserError,
     UserExhaustedError,
+    TaskFrozenError,
     TaskTimeoutError,
     validate_argument_type,
     validate_required_arguments,
@@ -89,6 +92,13 @@ __all__ = [
     "MessageHistory",
     "ToolInvocationHistory",
     "TraceableMixin",
+    # Usage tracking
+    "Usage",
+    "TokenUsage",
+    "UsageTrackableMixin",
+    "CostCalculator",
+    "StaticPricingCalculator",
+    "UsageReporter",
     # Registry and execution context
     "ComponentRegistry",
     "TaskContext",
@@ -110,6 +120,7 @@ __all__ = [
     "EnvironmentError",
     "UserError",
     "UserExhaustedError",
+    "TaskFrozenError",
     "TaskTimeoutError",
     "validate_argument_type",
     "validate_required_arguments",

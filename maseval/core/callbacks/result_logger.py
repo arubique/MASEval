@@ -34,6 +34,7 @@ class ResultLogger(BenchmarkCallback, ABC):
         include_traces: Whether to include execution traces in logged results
         include_config: Whether to include configuration in logged results
         include_eval: Whether to include evaluation results in logged results
+        include_usage: Whether to include API usage data in logged results
         validate_on_completion: Whether to validate all iterations were logged
 
     Example:
@@ -62,6 +63,8 @@ class ResultLogger(BenchmarkCallback, ABC):
         include_traces: bool = True,
         include_config: bool = True,
         include_eval: bool = True,
+        include_task: bool = True,
+        include_usage: bool = True,
         validate_on_completion: bool = True,
     ):
         """Initialize the result logger.
@@ -70,12 +73,17 @@ class ResultLogger(BenchmarkCallback, ABC):
             include_traces: If True, include execution traces in logged results
             include_config: If True, include configuration in logged results
             include_eval: If True, include evaluation results in logged results
+            include_task: If True, include task data (query, metadata, protocol)
+                in logged results
+            include_usage: If True, include API usage data in logged results
             validate_on_completion: If True, validate all iterations were logged at end
         """
         super().__init__()
         self.include_traces = include_traces
         self.include_config = include_config
         self.include_eval = include_eval
+        self.include_task = include_task
+        self.include_usage = include_usage
         self.validate_on_completion = validate_on_completion
 
         # Tracking for validation
@@ -172,6 +180,12 @@ class ResultLogger(BenchmarkCallback, ABC):
 
         if self.include_eval and "eval" in report:
             filtered["eval"] = report["eval"]
+
+        if self.include_usage and "usage" in report:
+            filtered["usage"] = report["usage"]
+
+        if self.include_task and "task" in report:
+            filtered["task"] = report["task"]
 
         return filtered
 
@@ -306,6 +320,8 @@ class FileResultLogger(ResultLogger):
         include_traces: bool = True,
         include_config: bool = True,
         include_eval: bool = True,
+        include_task: bool = True,
+        include_usage: bool = True,
         validate_on_completion: bool = True,
     ):
         """Initialize the file logger.
@@ -322,12 +338,17 @@ class FileResultLogger(ResultLogger):
             include_traces: If True, include execution traces in logged results
             include_config: If True, include configuration in logged results
             include_eval: If True, include evaluation results in logged results
+            include_task: If True, include task data (query, metadata, protocol)
+                in logged results
+            include_usage: If True, include API usage data in logged results
             validate_on_completion: If True, validate all iterations were logged
         """
         super().__init__(
             include_traces=include_traces,
             include_config=include_config,
             include_eval=include_eval,
+            include_task=include_task,
+            include_usage=include_usage,
             validate_on_completion=validate_on_completion,
         )
 
@@ -518,6 +539,8 @@ class FileResultLogger(ResultLogger):
             "include_traces": self.include_traces,
             "include_config": self.include_config,
             "include_eval": self.include_eval,
+            "include_task": self.include_task,
+            "include_usage": self.include_usage,
             "validation_enabled": self.validate_on_completion,
         }
 

@@ -67,6 +67,46 @@ class TestTaskProtocol:
 
         assert "key" not in p2.tags
 
+    def test_to_dict_defaults(self):
+        """to_dict should return all fields with defaults."""
+        protocol = TaskProtocol()
+        result = protocol.to_dict()
+
+        assert result == {
+            "timeout_seconds": None,
+            "timeout_action": "skip",
+            "max_retries": 0,
+            "priority": 0,
+            "tags": {},
+        }
+
+    def test_to_dict_custom_values(self):
+        """to_dict should serialize custom values and enums correctly."""
+        protocol = TaskProtocol(
+            timeout_seconds=60.0,
+            timeout_action=TimeoutAction.RETRY,
+            max_retries=3,
+            priority=10,
+            tags={"category": "hard"},
+        )
+        result = protocol.to_dict()
+
+        assert result == {
+            "timeout_seconds": 60.0,
+            "timeout_action": "retry",
+            "max_retries": 3,
+            "priority": 10,
+            "tags": {"category": "hard"},
+        }
+
+    def test_to_dict_returns_new_dict(self):
+        """to_dict should return a new dict, not a reference to internal state."""
+        protocol = TaskProtocol(tags={"key": "value"})
+        result = protocol.to_dict()
+
+        result["tags"]["key"] = "modified"
+        assert protocol.tags["key"] == "value"
+
 
 @pytest.mark.core
 class TestTaskWithProtocol:
